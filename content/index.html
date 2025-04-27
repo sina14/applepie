@@ -1,6 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
+<html lang="en" class=""> <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Linux TCP Connection Visualizer</title>
@@ -8,11 +7,126 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script>
+        // Apply theme preference on load and set initial class on <html>
+        const storedTheme = localStorage.theme;
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        // Set the theme class on the HTML element BEFORE the body renders
+        if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
+          document.documentElement.classList.add('dark');
+          console.log("Applying dark theme on load");
+        } else {
+          document.documentElement.classList.remove('dark'); // Explicitly remove if light
+           console.log("Applying light theme on load");
+        }
+    </script>
     <style>
+        /* Base styles */
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6; /* Tailwind gray-100 */
+            @apply bg-gray-100 text-gray-900; /* Light theme default */
+            position: relative;
+            transition: background-color 0.3s ease, color 0.3s ease;
+            padding-top: 4rem; /* Add padding to prevent overlap with fixed theme button */
         }
+        /* Dark theme styles */
+        .dark body {
+             @apply bg-gray-900 text-gray-200;
+        }
+        .dark .container {
+             @apply bg-gray-800 shadow-lg shadow-blue-900/20;
+        }
+        .dark h1, .dark h2, .dark h3 {
+            @apply text-gray-100;
+        }
+        .dark .socket {
+            @apply text-gray-200;
+        }
+        .dark .state-closed { border-color: #6b7280; background-color: #4b5563; } /* gray-500, gray-600 */
+        .dark .state-bound { border-color: #818cf8; background-color: #4338ca; } /* indigo-400, indigo-700 */
+        .dark .state-listen { border-color: #60a5fa; background-color: #1d4ed8; } /* blue-400, blue-700 */
+        .dark .state-syn-sent, .dark .state-syn-recv { border-color: #facc15; background-color: #b45309; } /* yellow-400, amber-700 */
+        .dark .state-established { border-color: #4ade80; background-color: #15803d; } /* green-400, green-700 */
+        .dark .state-fin-wait-1, .dark .state-fin-wait-2, .dark .state-close-wait, .dark .state-last-ack { border-color: #f87171; background-color: #b91c1c; } /* red-400, red-700 */
+        .dark .state-time-wait { border-color: #fb923c; background-color: #c2410c; } /* orange-400, orange-700 */
+
+        .dark .queue {
+            @apply border-gray-600 bg-gray-700;
+        }
+         .dark .queue span { /* Title span */
+             @apply text-gray-300;
+         }
+         .dark .queue div { /* Queue entry div */
+             @apply bg-gray-600 border-gray-500 text-gray-200;
+         }
+
+        .dark .controls {
+            @apply bg-gray-700;
+        }
+        .dark button:hover:not(:disabled) {
+             filter: brightness(1.1);
+        }
+         /* Dark theme for theme toggle button */
+        .dark #btn-theme-toggle {
+             @apply bg-gray-600 hover:bg-gray-500 text-yellow-300;
+        }
+
+        .dark .explanation { /* Blue explanation box */
+            @apply bg-blue-900/50 border-blue-700;
+        }
+        .dark .explanation h3 { @apply text-blue-200; }
+        .dark .explanation p { @apply text-blue-300; }
+        /* Style for code tag within explanation */
+        .dark .explanation code { @apply bg-blue-800/60 text-blue-200 px-1 rounded text-xs; }
+        .dark .explanation strong { @apply text-blue-100;}
+
+        /* Styling for the outer container of the lifecycle box */
+        .lifecycle-container {
+             @apply mt-6 p-4 bg-gray-200 dark:bg-gray-700 rounded-lg;
+             transition: opacity 0.5s ease-out, max-height 0.5s ease-out; /* Add transition */
+             overflow: hidden; /* Needed for max-height transition */
+             max-height: 1000px; /* Set a large max-height for visible state */
+             opacity: 1;
+        }
+        .lifecycle-container.hidden {
+             max-height: 0; /* Collapse when hidden */
+             opacity: 0;
+             padding-top: 0;
+             padding-bottom: 0;
+             margin-top: 0;
+             border-width: 0; /* Hide border if any */
+             pointer-events: none;
+        }
+
+        .dark .lifecycle-container { /* Dark theme for outer container */
+             @apply bg-gray-700;
+        }
+
+        .dark .lifecycle-infobox { /* Orange info box - now static */
+             /* Removed background/border - handled by outer container now? Or keep for contrast? Let's keep inner style for now */
+             @apply bg-orange-900/50 border-orange-700;
+        }
+         .dark .lifecycle-infobox h3 { @apply text-orange-200; }
+         .dark .lifecycle-infobox ol { @apply text-orange-300; }
+         .dark .lifecycle-infobox strong { @apply text-orange-100; }
+         /* Style for code tag within lifecycle box */
+         .dark .lifecycle-infobox code { @apply bg-orange-800/60 text-orange-200 px-1 rounded text-xs; }
+
+        .dark .packet-display {
+            filter: brightness(0.9);
+        }
+        .dark .packet-flow div {
+            @apply text-gray-400;
+        }
+        .dark .text-gray-600 { /* e.g. Packets Sent/Received title */
+             @apply text-gray-400;
+        }
+        .dark .text-gray-700 { /* e.g. Queue titles */
+             @apply text-gray-300;
+        }
+
+
         /* Custom styles for visualization elements */
         .socket {
             border: 2px solid;
@@ -33,9 +147,8 @@
             padding: 1rem; /* p-4 */
             margin-top: 0.5rem; /* mt-2 */
             min-height: 100px;
-            background-color: #e5e7eb; /* gray-200 */
+            @apply bg-gray-200;
         }
-        /* Style for the animated packet in the central flow area */
         .packet {
             border-radius: 9999px; /* rounded-full */
             padding: 0.25rem 0.75rem; /* px-3 py-1 */
@@ -44,10 +157,9 @@
             margin: 0.25rem; /* m-1 */
             display: inline-block;
             transition: all 0.5s ease-in-out;
-            opacity: 0; /* Start hidden for animation */
-            transform: translateY(20px); /* Start below for animation */
+            opacity: 0;
+            transform: translateY(20px);
         }
-         /* Style for packets shown temporarily in the Sent/Received list */
         .packet-display {
              border-radius: 9999px; /* rounded-full */
             padding: 0.25rem 0.75rem; /* px-3 py-1 */
@@ -55,35 +167,32 @@
             font-weight: 600; /* font-semibold */
             margin: 0.25rem; /* m-1 */
             display: inline-block;
-             transition: opacity 0.5s ease-out 2s; /* Fade out transition STARTING after 2s delay */
-             opacity: 1; /* Start visible */
+             transition: opacity 0.5s ease-out;
+             opacity: 1;
         }
-        .packet-syn { background-color: #60a5fa; color: white; } /* blue-400 */
-        .packet-synack { background-color: #fbbf24; color: white; } /* amber-400 */
-        .packet-ack { background-color: #4ade80; color: white; } /* green-400 */
-        .packet-fin { background-color: #f87171; color: white; } /* red-400 */
-        .packet-data { background-color: #a78bfa; color: white; } /* violet-400 */
+        .packet-syn { background-color: #60a5fa; color: white; }
+        .packet-synack { background-color: #fbbf24; color: white; }
+        .packet-ack { background-color: #4ade80; color: white; }
+        .packet-fin { background-color: #f87171; color: white; }
+        .packet-data { background-color: #a78bfa; color: white; }
 
-        /* Socket states */
-        .state-closed { border-color: #9ca3af; background-color: #e5e7eb; } /* gray-400, gray-200 */
-        .state-bound { border-color: #a5b4fc; background-color: #e0e7ff; } /* indigo-300, indigo-100 */
-        .state-listen { border-color: #3b82f6; background-color: #dbeafe; } /* blue-500, blue-100 */
-        .state-syn-sent { border-color: #f59e0b; background-color: #fef3c7; } /* amber-500, amber-100 */
-        .state-syn-recv { border-color: #f59e0b; background-color: #fef3c7; } /* amber-500, amber-100 */
-        .state-established { border-color: #22c55e; background-color: #dcfce7; } /* green-500, green-100 */
-        .state-fin-wait-1 { border-color: #ef4444; background-color: #fee2e2; } /* red-500, red-100 */
-        .state-fin-wait-2 { border-color: #ef4444; background-color: #fee2e2; } /* red-500, red-100 */
-        .state-close-wait { border-color: #ef4444; background-color: #fee2e2; } /* red-500, red-100 */
-        .state-last-ack { border-color: #ef4444; background-color: #fee2e2; } /* red-500, red-100 */
-        .state-time-wait { border-color: #f97316; background-color: #ffedd5; } /* orange-500, orange-100 */
+        .state-closed { border-color: #9ca3af; background-color: #e5e7eb; }
+        .state-bound { border-color: #a5b4fc; background-color: #e0e7ff; }
+        .state-listen { border-color: #3b82f6; background-color: #dbeafe; }
+        .state-syn-sent { border-color: #f59e0b; background-color: #fef3c7; }
+        .state-syn-recv { border-color: #f59e0b; background-color: #fef3c7; }
+        .state-established { border-color: #22c55e; background-color: #dcfce7; }
+        .state-fin-wait-1 { border-color: #ef4444; background-color: #fee2e2; }
+        .state-fin-wait-2 { border-color: #ef4444; background-color: #fee2e2; }
+        .state-close-wait { border-color: #ef4444; background-color: #fee2e2; }
+        .state-last-ack { border-color: #ef4444; background-color: #fee2e2; }
+        .state-time-wait { border-color: #f97316; background-color: #ffedd5; }
 
-        /* Animation for packets in flow */
         .packet-visible {
             opacity: 1;
             transform: translateY(0);
         }
 
-        /* Ensure buttons look good */
         button {
             transition: all 0.2s ease-in-out;
         }
@@ -96,22 +205,87 @@
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
 
+        /* Theme Toggle Button Style */
+        #btn-theme-toggle {
+            position: fixed; /* Position fixed relative to viewport */
+            top: 1rem; /* Adjust as needed */
+            left: 1rem; /* Adjust as needed */
+            z-index: 100; /* Ensure it's above everything */
+            @apply p-2 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-700;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+         #btn-theme-toggle svg {
+             width: 1.25rem; /* w-5 */
+             height: 1.25rem; /* h-5 */
+         }
+         /* Hide one icon based on theme */
+        .dark #theme-icon-light { display: block; } /* Show sun in dark */
+        .dark #theme-icon-dark { display: none; }
+        html:not(.dark) #theme-icon-light { display: none; } /* Hide sun in light */
+        html:not(.dark) #theme-icon-dark { display: block; } /* Show moon in light */
+
+
+        /* Lifecycle Info Box styles - inner box */
+        .lifecycle-infobox {
+            width: 100%; /* Take full width of container */
+            @apply bg-orange-100 border-2 border-orange-500 rounded-lg p-6 shadow-md;
+            /* Removed transition from inner box, handled by outer container */
+        }
+        /* No hidden class needed for inner box anymore */
+
+        .lifecycle-infobox h3 {
+            @apply text-orange-700;
+        }
+         .lifecycle-infobox ol {
+             @apply text-orange-600;
+             overflow-y: visible; /* No scroll needed now */
+         }
+         /* Style for code tag within lifecycle box */
+         .lifecycle-infobox code {
+             @apply bg-orange-200 text-orange-800 px-1 rounded text-xs;
+         }
+         .lifecycle-infobox strong {
+             @apply font-semibold text-orange-700;
+         }
+
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
+            body { padding-top: 4.5rem; } /* Adjust padding for smaller screens if needed */
+            #btn-theme-toggle { top: 0.5rem; left: 0.5rem; }
             .flex-col.md\\:flex-row { flex-direction: column; }
             .w-full.md\\:w-1\\/3 { width: 100%; }
             .w-full.md\\:w-2\\/3 { width: 100%; }
-            .md\\:mt-0 { margin-top: 1rem; } /* Add space between columns on mobile */
+            .md\\:mt-0 { margin-top: 1rem; }
+            .lifecycle-container {
+                padding: 1rem; /* p-4 */
+            }
+            .lifecycle-infobox {
+                 padding: 1rem; /* Adjust inner box padding too if needed */
+            }
+            /* Adjust lifecycle container transitions when hidden on small screens */
+            .lifecycle-container.hidden {
+                 padding-top: 0;
+                 padding-bottom: 0;
+            }
         }
     </style>
 </head>
-<body class="p-4 md:p-8">
-    <div class="container mx-auto max-w-7xl bg-white p-6 rounded-lg shadow-lg">
-        <h1 class="text-2xl md:text-3xl font-bold mb-6 text-center text-gray-800">Linux Kernel TCP Connection Visualizer</h1>
+<body class="md:p-8"> <button id="btn-theme-toggle" aria-label="Toggle theme">
+        <svg id="theme-icon-light" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+        </svg>
+        <svg id="theme-icon-dark" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+        </svg>
+    </button>
 
-        <div class="controls bg-gray-100 p-4 rounded-lg mb-6 flex flex-wrap justify-center gap-2">
+    <div class="container mx-auto max-w-7xl bg-white p-6 rounded-lg shadow-lg dark:bg-gray-800">
+        <h1 class="text-2xl md:text-3xl font-bold mb-6 text-center text-gray-800 dark:text-gray-100">Linux Kernel TCP Connection Visualizer</h1>
+
+        <div class="controls bg-gray-100 dark:bg-gray-700 p-4 rounded-lg mb-6 flex flex-wrap justify-center gap-2">
              <button id="btn-reset" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Reset</button>
-            <button id="btn-socket-bind" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded">0. Server: socket() & bind()</button>
+             <button id="btn-socket-bind" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded">0. Server: socket() & bind()</button>
             <button id="btn-listen" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded" disabled>1. Server: listen()</button>
             <button id="btn-connect" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded" disabled>2. Client: connect()</button>
             <button id="btn-accept" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded" disabled>3. Server: accept()</button>
@@ -123,87 +297,90 @@
         </div>
 
         <div class="flex flex-col md:flex-row gap-6">
-            <div class="w-full md:w-1/3 border border-gray-300 p-4 rounded-lg bg-gray-50">
-                <h2 class="text-xl font-semibold mb-4 text-center text-gray-700">Client</h2>
+            <div class="w-full md:w-1/3 border border-gray-300 dark:border-gray-600 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                <h2 class="text-xl font-semibold mb-4 text-center text-gray-700 dark:text-gray-100">Client</h2>
                 <div id="client-socket" class="socket state-closed">
                     <span class="font-medium">Socket</span>
                     <span id="client-state" class="text-sm font-semibold">CLOSED</span>
-                    <span id="client-syscall" class="text-xs text-gray-600 mt-1"></span>
+                    <span id="client-syscall" class="text-xs text-gray-600 dark:text-gray-400 mt-1"></span>
                 </div>
                 <div class="mt-4 text-center min-h-[50px]">
-                    <span class="text-sm font-medium text-gray-600 block mb-1">Packets Sent/Received:</span>
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400 block mb-1">Packets Sent/Received:</span>
                     <div id="client-packets">
                        </div>
                 </div>
             </div>
 
-            <div class="w-full md:w-1/3 border border-gray-300 p-4 rounded-lg bg-gray-50 flex flex-col justify-center items-center min-h-[200px]">
-                 <h2 class="text-xl font-semibold mb-4 text-center text-gray-700">Network</h2>
+            <div class="w-full md:w-1/3 border border-gray-300 dark:border-gray-600 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 flex flex-col justify-center items-center min-h-[200px]">
+                 <h2 class="text-xl font-semibold mb-4 text-center text-gray-700 dark:text-gray-100">Network</h2>
                  <div id="packet-flow" class="w-full h-full flex flex-col justify-around items-center relative">
-                     <div class="text-gray-500 text-sm absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">Packet Flow</div>
+                     <div class="text-gray-500 dark:text-gray-400 text-sm absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">Packet Flow</div>
                  </div>
             </div>
 
-            <div class="w-full md:w-1/3 border border-gray-300 p-4 rounded-lg bg-gray-50">
-                <h2 class="text-xl font-semibold mb-4 text-center text-gray-700">Server</h2>
+            <div class="w-full md:w-1/3 border border-gray-300 dark:border-gray-600 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
+                <h2 class="text-xl font-semibold mb-4 text-center text-gray-700 dark:text-gray-100">Server</h2>
                  <div id="server-listen-socket" class="socket state-closed">
                     <span class="font-medium">Listening Socket</span>
                     <span id="server-listen-state" class="text-sm font-semibold">CLOSED</span>
-                    <span id="server-listen-syscall" class="text-xs text-gray-600 mt-1"></span>
+                    <span id="server-listen-syscall" class="text-xs text-gray-600 dark:text-gray-400 mt-1"></span>
                 </div>
                  <div id="server-conn-socket" class="socket state-closed hidden">
                     <span class="font-medium">Connection Socket</span>
                     <span id="server-conn-state" class="text-sm font-semibold">CLOSED</span>
-                    <span id="server-conn-syscall" class="text-xs text-gray-600 mt-1"></span>
+                    <span id="server-conn-syscall" class="text-xs text-gray-600 dark:text-gray-400 mt-1"></span>
                 </div>
 
                 <div class="mt-4">
-                    <h3 class="text-lg font-medium mb-2 text-center text-gray-600">Kernel Queues</h3>
+                    <h3 class="text-lg font-medium mb-2 text-center text-gray-600 dark:text-gray-300">Kernel Queues</h3>
                     <div id="syn-queue" class="queue mb-2">
-                        <span class="font-medium text-sm text-gray-700 block text-center mb-1">SYN Queue (Incomplete Connections)</span>
+                        <span class="font-medium text-sm text-gray-700 dark:text-gray-300 block text-center mb-1">SYN Queue (Incomplete Connections)</span>
                         </div>
                     <div id="accept-queue" class="queue">
-                         <span class="font-medium text-sm text-gray-700 block text-center mb-1">Accept Queue (Completed Connections)</span>
+                         <span class="font-medium text-sm text-gray-700 dark:text-gray-300 block text-center mb-1">Accept Queue (Completed Connections)</span>
                          </div>
                 </div>
                  <div class="mt-4 text-center min-h-[50px]">
-                    <span class="text-sm font-medium text-gray-600 block mb-1">Packets Sent/Received:</span>
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400 block mb-1">Packets Sent/Received:</span>
                      <div id="server-packets">
                        </div>
                 </div>
             </div>
         </div>
 
-        <div class="explanation mt-6 bg-blue-50 p-4 rounded-lg border border-blue-200">
-            <h3 class="text-lg font-semibold mb-2 text-blue-800">Explanation</h3>
-            <p id="explanation-text" class="text-sm text-blue-700">
+        <div class="explanation mt-6 bg-blue-50 dark:bg-blue-900/50 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+            <h3 class="text-lg font-semibold mb-2 text-blue-800 dark:text-blue-200">Explanation</h3>
+            <p id="explanation-text" class="text-sm text-blue-700 dark:text-blue-300">
                 Click the buttons above in sequence to visualize the TCP connection process. Start with "0. Server: socket() & bind()".
             </p>
         </div>
 
-         <div class="explanation mt-6 bg-green-50 p-4 rounded-lg border border-green-200">
-            <h3 class="text-lg font-semibold mb-2 text-green-800">Incoming Packet Lifecycle (NIC to Application)</h3>
-            <ol id="lifecycle-text" class="text-sm text-green-700 list-decimal list-inside space-y-1">
-                <li>Packet arrives at <strong>NIC</strong>, copied via <strong>DMA</strong> to kernel ring buffer. NIC raises interrupt.</li>
-                <li>CPU handles interrupt, driver's ISR (top-half) runs briefly, disables NIC interrupts, schedules deferred work (<strong>NAPI</strong>).</li>
-                <li>NAPI poll function (bottom-half/softirq) runs, processes packets from ring buffer in batches.</li>
-                <li>Driver allocates <strong><code>sk_buff</code></strong> for packet, maps data, returns DMA buffer to NIC.</li>
-                <li>Driver passes <code>sk_buff</code> up using e.g., <strong><code>netif_receive_skb()</code></strong>.</li>
-                <li>Network stack determines L3 protocol (e.g., IP) from L2 header, strips L2 header.</li>
-                <li>IP layer (<strong><code>ip_rcv</code></strong>) validates IP header, checks routing (finds local destination), determines L4 protocol (e.g., TCP), strips IP header.</li>
-                <li>TCP layer (<strong><code>tcp_v4_rcv</code></strong>) finds matching socket via 4-tuple lookup.</li>
-                <li>Processes TCP header (seq/ack numbers, flags). For DATA on ESTABLISHED: queues <code>sk_buff</code> data in socket receive queue (<strong><code>sk->sk_receive_queue</code></strong>). Schedules TCP ACK.</li>
-                <li>Kernel wakes up application process if it was sleeping in e.g., <strong><code>recv()</code></strong> waiting for data.</li>
-                <li>Application resumes in kernel mode (system call). Kernel copies data from <code>sk_buff</code>(s) in receive queue to app's user-space buffer.</li>
-                <li>Kernel frees processed <code>sk_buff</code>(s). System call returns number of bytes copied.</li>
-                <li>Application execution returns to user space with data in its buffer.</li>
-            </ol>
+        <div id="lifecycle-container" class="lifecycle-container hidden">
+            <div id="lifecycle-infobox" class="lifecycle-infobox">
+                <h3 class="text-lg font-semibold mb-2">Incoming Packet Lifecycle (NIC to Application)</h3>
+                <ol class="text-sm list-decimal list-inside space-y-1">
+                    <li>Packet arrives at <strong>NIC</strong>, copied via <strong>DMA</strong> to kernel ring buffer. NIC raises interrupt.</li>
+                    <li>CPU handles interrupt, driver's ISR (top-half) runs briefly, disables NIC interrupts, schedules deferred work (<strong>NAPI</strong>).</li>
+                    <li>NAPI poll function (bottom-half/softirq) runs, processes packets from ring buffer in batches.</li>
+                    <li>Driver allocates <strong><code>sk_buff</code></strong> for packet, maps data, returns DMA buffer to NIC.</li>
+                    <li>Driver passes <code>sk_buff</code> up using e.g., <strong><code>netif_receive_skb()</code></strong>.</li>
+                    <li>Network stack determines L3 protocol (e.g., IP) from L2 header, strips L2 header.</li>
+                    <li>IP layer (<strong><code>ip_rcv</code></strong>) validates IP header, checks routing (finds local destination), determines L4 protocol (e.g., TCP), strips IP header.</li>
+                    <li>TCP layer (<strong><code>tcp_v4_rcv</code></strong>) finds matching socket via 4-tuple lookup.</li>
+                    <li>Processes TCP header (seq/ack numbers, flags). For DATA on ESTABLISHED: queues <code>sk_buff</code> data in socket receive queue (<strong><code>sk->sk_receive_queue</code></strong>). Schedules TCP ACK.</li>
+                    <li>Kernel wakes up application process if it was sleeping in e.g., <strong><code>recv()</code></strong> waiting for data.</li>
+                    <li>Application resumes in kernel mode (system call). Kernel copies data from <code>sk_buff</code>(s) in receive queue to app's user-space buffer.</li>
+                    <li>Kernel frees processed <code>sk_buff</code>(s). System call returns number of bytes copied.</li>
+                    <li>Application execution returns to user space with data in its buffer.</li>
+                </ol>
+            </div>
         </div>
-    </div>
 
-    <script>
+
+    </div> <script>
         // --- DOM Elements ---
         const btnReset = document.getElementById('btn-reset');
+        const btnThemeToggle = document.getElementById('btn-theme-toggle'); // Theme button
         const btnSocketBind = document.getElementById('btn-socket-bind');
         const btnListen = document.getElementById('btn-listen');
         const btnConnect = document.getElementById('btn-connect');
@@ -217,7 +394,7 @@
         const clientSocket = document.getElementById('client-socket');
         const clientState = document.getElementById('client-state');
         const clientSyscall = document.getElementById('client-syscall');
-        const clientPackets = document.getElementById('client-packets'); // Container div
+        const clientPackets = document.getElementById('client-packets');
 
         const serverListenSocket = document.getElementById('server-listen-socket');
         const serverListenState = document.getElementById('server-listen-state');
@@ -225,12 +402,14 @@
         const serverConnSocket = document.getElementById('server-conn-socket');
         const serverConnState = document.getElementById('server-conn-state');
         const serverConnSyscall = document.getElementById('server-conn-syscall');
-        const serverPackets = document.getElementById('server-packets'); // Container div
+        const serverPackets = document.getElementById('server-packets');
 
         const synQueue = document.getElementById('syn-queue');
         const acceptQueue = document.getElementById('accept-queue');
         const packetFlow = document.getElementById('packet-flow');
         const explanationText = document.getElementById('explanation-text');
+        const lifecycleContainer = document.getElementById('lifecycle-container'); // Outer container
+        const lifecycleInfoBox = document.getElementById('lifecycle-infobox'); // Inner box
 
         // --- State Variables ---
         let clientSocketState = 'CLOSED';
@@ -243,10 +422,55 @@
         let serverClosing = false;
         let listenerClosed = false;
         let step = -1;
-        const PACKET_DISPLAY_DURATION = 2500; // Milliseconds to show packets in list before fade starts
-        const PACKET_FADE_DURATION = 500; // Milliseconds for fade out animation
+        const PACKET_DISPLAY_DURATION = 2000;
+        const PACKET_FADE_DURATION = 500;
+        let audioStarted = false; // Flag to track if Tone.js context is started
+        // let synth = null; // Removed global synth
 
         // --- Utility Functions ---
+
+        // Play a short sound using a temporary synth
+        async function playSound(note = 'C5', duration = '16n') {
+            // Ensure audio context is started (usually requires user interaction first)
+            if (!audioStarted) {
+                try {
+                    await Tone.start();
+                    console.log("Audio context started by Tone.start()");
+                    audioStarted = true;
+                } catch (e) {
+                    console.error("Error starting Tone.js audio context:", e);
+                    return; // Don't proceed if audio can't start
+                }
+            }
+
+            // Create a synth, play sound, and dispose immediately after release
+            try {
+                const tempSynth = new Tone.Synth({
+                     oscillator: { type: 'sine' },
+                     envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.1 },
+                 }).toDestination();
+
+                // Play the sound now
+                tempSynth.triggerAttackRelease(note, duration, Tone.now());
+                console.log(`Played sound: ${note}`);
+
+                // Schedule disposal shortly after the release ends
+                 // Convert duration string (like '16n') to seconds, add release time, add buffer
+                const durationSeconds = Tone.Time(duration).toSeconds();
+                const releaseSeconds = tempSynth.envelope.release; // Assuming release is a number in seconds
+                const totalSoundDuration = durationSeconds + releaseSeconds;
+                const disposeDelay = (totalSoundDuration + 0.1) * 1000; // Delay in ms
+
+                setTimeout(() => {
+                    tempSynth.dispose();
+                    // console.log("Temporary synth disposed");
+                }, disposeDelay);
+
+            } catch (e) {
+                 console.error("Error playing sound with Tone.js:", e);
+            }
+        }
+
 
         function resetVisualization() {
             clientSocketState = 'CLOSED';
@@ -260,16 +484,34 @@
             listenerClosed = false;
             step = -1;
 
+            // Hide lifecycle box container on reset
+            lifecycleContainer.classList.add('hidden');
+
             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
             updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState);
             updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
             serverConnSocket.classList.add('hidden');
 
-            synQueue.innerHTML = '<span class="font-medium text-sm text-gray-700 block text-center mb-1">SYN Queue (Incomplete Connections)</span>';
-            acceptQueue.innerHTML = '<span class="font-medium text-sm text-gray-700 block text-center mb-1">Accept Queue (Completed Connections)</span>';
-            clientPackets.innerHTML = ''; // Clear packet display areas
-            serverPackets.innerHTML = ''; // Clear packet display areas
-            packetFlow.innerHTML = '<div class="text-gray-500 text-sm absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">Packet Flow</div>';
+            // Ensure queue titles are preserved while clearing entries
+            const synQueueTitle = synQueue.querySelector('span');
+            synQueue.innerHTML = '';
+            if (synQueueTitle) synQueue.appendChild(synQueueTitle);
+
+            const acceptQueueTitle = acceptQueue.querySelector('span');
+            acceptQueue.innerHTML = '';
+            if (acceptQueueTitle) acceptQueue.appendChild(acceptQueueTitle);
+
+            clientPackets.innerHTML = '';
+            serverPackets.innerHTML = '';
+            packetFlow.innerHTML = '<div class="text-gray-500 dark:text-gray-400 text-sm absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">Packet Flow</div>';
+
+            // Clear any lingering packet removal timers
+            document.querySelectorAll('.packet-display').forEach(el => {
+                if (el.dataset.fadeTimer) clearTimeout(parseInt(el.dataset.fadeTimer));
+                if (el.dataset.removeTimer) clearTimeout(parseInt(el.dataset.removeTimer));
+                el.remove();
+            });
+
 
             btnSocketBind.disabled = false;
             btnListen.disabled = true;
@@ -286,117 +528,110 @@
         }
 
         function updateSocketUI(socketElement, stateElement, syscallElement, state, syscallText = '') {
+            const previousState = stateElement.textContent;
             socketElement.className = socketElement.className.replace(/\bstate-\S+/g, 'socket');
             socketElement.classList.add(`state-${state.toLowerCase().replace('_', '-')}`);
             stateElement.textContent = state;
             syscallElement.textContent = syscallText ? `Syscall: ${syscallText}` : '';
+
+            // Play sound if state actually changed
+            if (previousState !== state && previousState !== '' && audioStarted) { // Avoid playing on initial setup or before audio starts
+                playSound('E5', '32n'); // Play a slightly different note for state changes
+            }
         }
 
-        function setExplanation(text) {
-            explanationText.innerHTML = text;
+        function setExplanation(htmlContent) {
+            explanationText.innerHTML = htmlContent;
         }
 
         /**
          * Adds a packet element to a display area and schedules its removal with a fade-out.
-         * @param {HTMLElement} packetElement - The packet span element to display.
-         * @param {HTMLElement} targetDisplayArea - The container div (clientPackets or serverPackets).
          */
         function addPacketToDisplay(packetElement, targetDisplayArea) {
             targetDisplayArea.appendChild(packetElement);
-             // Use requestAnimationFrame to ensure the element is rendered before applying fade-out style
              requestAnimationFrame(() => {
-                 // Schedule fade out to start after PACKET_DISPLAY_DURATION
                 const fadeTimer = setTimeout(() => {
-                    packetElement.style.opacity = '0'; // Start fade out
-                    // Schedule removal from DOM after fade completes
+                    packetElement.style.opacity = '0';
                     const removeTimer = setTimeout(() => {
-                        if (packetElement.parentNode === targetDisplayArea) { // Check if still attached
+                        if (packetElement.parentNode === targetDisplayArea) {
                              targetDisplayArea.removeChild(packetElement);
                         }
-                    }, PACKET_FADE_DURATION); // Remove from DOM after fade out
-                     // Store timer ID on element for potential cleanup on reset
-                    packetElement.dataset.removeTimer = removeTimer;
+                    }, PACKET_FADE_DURATION);
+                    packetElement.dataset.removeTimer = removeTimer.toString();
                 }, PACKET_DISPLAY_DURATION);
-                 // Store timer ID on element for potential cleanup on reset
-                packetElement.dataset.fadeTimer = fadeTimer;
+                packetElement.dataset.fadeTimer = fadeTimer.toString();
              });
         }
 
         /**
          * Animates a packet moving in the central flow area AND displays it temporarily
-         * in the sender/receiver lists.
-         * @param {string} type - Packet type (SYN, ACK, FIN, DATA, etc.).
-         * @param {string} direction - 'client-to-server' or 'server-to-client'.
+         * in the sender/receiver lists. Plays a sound on send.
          */
         function animatePacket(type, direction) {
-            // 1. Create the packet for the central animation flow
+            // Play sound when packet is "sent" (animation starts)
+            playSound('C5', '16n'); // Pop sound for packets
+
             const packet = document.createElement('span');
             packet.classList.add('packet', `packet-${type.toLowerCase()}`);
             packet.textContent = type;
             packetFlow.appendChild(packet);
 
-            // 2. Create packet representations for the display areas (Sent/Received lists)
             const packetDisplaySent = document.createElement('span');
-            // Add classes for styling and identification
             packetDisplaySent.className = `packet-display packet-${type.toLowerCase()}`;
             packetDisplaySent.textContent = type;
 
             const packetDisplayRcvd = document.createElement('span');
-            // Add classes for styling and identification
             packetDisplayRcvd.className = `packet-display packet-${type.toLowerCase()}`;
             packetDisplayRcvd.textContent = type;
 
-
-            // 3. Add packet to the sender's list immediately and schedule its removal
             if (direction === 'client-to-server') {
                 addPacketToDisplay(packetDisplaySent, clientPackets);
             } else {
                  addPacketToDisplay(packetDisplaySent, serverPackets);
             }
 
-            // 4. Animate the central packet flow
-            void packet.offsetWidth; // Force reflow for animation start
+            void packet.offsetWidth;
 
             requestAnimationFrame(() => {
-                packet.classList.add('packet-visible'); // Make visible and start transition
+                packet.classList.add('packet-visible');
                 packet.style.position = 'absolute';
                 if (direction === 'client-to-server') {
                     packet.style.top = '10%';
                     packet.style.left = '10%';
-                    packet.style.transform = 'translate(150%, 250%) scale(1.2)'; // Move visually
+                    packet.style.transform = 'translate(150%, 250%) scale(1.2)';
                 } else {
                     packet.style.bottom = '10%';
                     packet.style.right = '10%';
-                    packet.style.transform = 'translate(-150%, -250%) scale(1.2)'; // Move visually
+                    packet.style.transform = 'translate(-150%, -250%) scale(1.2)';
                 }
-                // Remove the central animated packet after its animation
                 setTimeout(() => {
-                    packet.style.opacity = '0'; // Fade out central packet
-                    setTimeout(() => packet.remove(), 500); // Remove from DOM
-                }, 1000); // Duration of central animation visibility
+                    packet.style.opacity = '0';
+                    setTimeout(() => packet.remove(), 500);
+                }, 1000);
             });
 
-            // 5. Add packet to the receiver's list after a delay and schedule its removal
              setTimeout(() => {
                  if (direction === 'client-to-server') {
                     addPacketToDisplay(packetDisplayRcvd, serverPackets);
                  } else {
                     addPacketToDisplay(packetDisplayRcvd, clientPackets);
                  }
-             }, 500); // Simulate network latency before arrival display
+             }, 500);
         }
 
         function updateQueueUI(queueElement, queueContent, type) {
-            const title = queueElement.querySelector('span');
-            queueElement.innerHTML = '';
-            if (title) queueElement.appendChild(title);
+            const title = queueElement.querySelector('span'); // Get the title span
+            queueElement.innerHTML = ''; // Clear only entries, not the title
+            if (title) queueElement.appendChild(title); // Re-add the title
             queueContent.forEach(item => {
                 const entry = document.createElement('div');
-                entry.classList.add('text-xs', 'p-1', 'bg-white', 'rounded', 'border', 'border-gray-300', 'mb-1', 'text-center');
+                // Added dark theme classes for queue entries
+                entry.classList.add('text-xs', 'p-1', 'bg-white', 'dark:bg-gray-600', 'rounded', 'border', 'border-gray-300', 'dark:border-gray-500', 'mb-1', 'text-center');
                 entry.textContent = `${type}: ${item.state}`;
                 queueElement.appendChild(entry);
             });
         }
+
 
         function checkEnableCloseListener() {
              if ((clientSocketState === 'CLOSED' || clientSocketState === 'TIME_WAIT') &&
@@ -406,25 +641,55 @@
              }
         }
 
-        // --- Event Handlers ---
-        // (Event Handlers for steps 0-6 remain largely the same as previous version,
-        //  only changes are related to calling the modified animatePacket function
-        //  and explanation text content. Full handlers included for completeness.)
+        /**
+         * Shows the packet lifecycle info box container.
+         */
+        function showLifecycleInfo() {
+            // Make the outer container visible
+            lifecycleContainer.classList.remove('hidden');
+            console.log("Lifecycle info box shown.");
+        }
+
+        /**
+         * Toggles the dark theme and updates the button icon via CSS.
+         */
+        function toggleTheme() {
+            console.log("Toggle theme button clicked"); // Debug log
+            const isDark = document.documentElement.classList.toggle('dark');
+            localStorage.theme = isDark ? 'dark' : 'light';
+            console.log(`Theme toggled to: ${isDark ? 'dark' : 'light'}`);
+        }
+
+
+        // --- Event Handlers (Explanations restored & button enabling verified) ---
 
         // 0. Server Socket & Bind
         btnSocketBind.addEventListener('click', () => {
             if (step !== -1) return;
+
+            // Initialize audio context on first user interaction if not already done
+            if (!audioStarted) {
+                Tone.start().then(() => {
+                    console.log("Audio context started by user interaction.");
+                    audioStarted = true;
+                    playSound('G4', '8n'); // Play a slightly longer initial sound
+                }).catch(e => console.error("Error starting audio context:", e));
+            } else {
+                 playSound('G4', '8n'); // Play sound even if context was already started
+            }
+
+
             serverListenSocketState = 'BOUND';
             updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'socket(), bind()');
             setExplanation(`
                 <strong>Server: socket() & bind()</strong><br>
-                1. <strong><code>socket()</code></strong>: App requests endpoint. Kernel creates <code>struct socket</code>/<code>struct sock</code>. Returns file descriptor (fd).<br>
-                2. <strong><code>bind()</code></strong>: App assigns IP/Port to socket fd. Kernel verifies and stores info. Socket associated with address, not yet listening.
+                1. <strong><code>socket()</code></strong>: The application requests a communication endpoint from the kernel. The kernel creates the core data structures (<code>struct socket</code>, which points to a protocol-specific <code>struct sock</code> like <code>tcp_sock</code>) to manage the connection state, buffers, etc. It returns a file descriptor (fd) to the application.<br>
+                2. <strong><code>bind()</code></strong>: The application assigns a specific local IP address and port number to the created socket fd. The kernel verifies the address/port usability and stores this information within the socket structure. The socket is now associated with a network interface and port, but it's not yet listening for incoming connections.
             `);
             btnSocketBind.disabled = true;
-            btnListen.disabled = false;
+            btnListen.disabled = false; // *** Enable next button ***
             step = 0;
-            console.log("Step 0: Server Socket Created and Bound");
+            console.log("Step 0: Server Socket Created and Bound, Listen button enabled:", !btnListen.disabled);
         });
 
 
@@ -435,13 +700,15 @@
             updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'listen()');
             setExplanation(`
                 <strong>Server: listen()</strong><br>
-                1. <strong><code>listen()</code></strong>: Marks bound socket as passive (listening).<br>
-                2. Kernel allocates <strong>SYN Queue</strong> (for incomplete connections, <code>struct request_sock</code>, limited by <code>tcp_max_syn_backlog</code>) and <strong>Accept Queue</strong> (for completed connections, <code>struct sock</code>, limited by <code>listen()</code> backlog).
+                1. <strong><code>listen()</code></strong>: The application marks the bound socket as a passive socket, ready to accept incoming connection requests. <br>
+                2. The kernel allocates memory for two crucial queues associated with this listening socket:
+                   - <strong>SYN Queue</strong>: Stores incomplete connection requests (represented by <code>struct request_sock</code> or similar lightweight structures) after receiving the initial SYN packet from a client. This queue has a limited size (controlled by <code>net.ipv4.tcp_max_syn_backlog</code> sysctl).
+                   - <strong>Accept Queue</strong>: Stores fully established connections (represented by newly created <code>struct sock</code> structures) that have completed the three-way handshake and are waiting for the application to retrieve them via the <code>accept()</code> system call. The size is limited by the <code>backlog</code> argument passed to <code>listen()</code>.
             `);
             btnListen.disabled = true;
-            btnConnect.disabled = false;
+            btnConnect.disabled = false; // *** Enable next button ***
             step = 1;
-            console.log("Step 1: Server Listening");
+            console.log("Step 1: Server Listening, Connect button enabled:", !btnConnect.disabled);
         });
 
         // 2. Client Connect (Initiates 3-way Handshake)
@@ -449,40 +716,41 @@
             if (step !== 1) return;
             clientSocketState = 'SYN_SENT';
             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'socket(), connect()');
-            animatePacket('SYN', 'client-to-server'); // Uses updated function
+            animatePacket('SYN', 'client-to-server');
             setExplanation(`
                 <strong>Client: connect() & SYN Sent</strong><br>
-                1. <code>socket()</code>: Client gets socket fd.<br>
-                2. <code>connect()</code>: Initiates handshake. Kernel picks ephemeral port, sends SYN.<br>
-                3. Client socket -> <strong>SYN_SENT</strong>.<br>
+                1. <code>socket()</code>: Kernel creates a client socket (file descriptor returned).<br>
+                2. <code>connect()</code>: Initiates the TCP three-way handshake. The client kernel picks an ephemeral source port, creates a SYN packet containing the server's IP/port and its own sequence number, and sends it.<br>
+                3. Client socket enters <strong>SYN_SENT</strong> state, waiting for a SYN-ACK.<br>
                 <strong>Server Receives SYN:</strong><br>
-                1. Kernel finds matching LISTEN socket.<br>
-                2. Creates <code>request_sock</code>, adds to SYN Queue (if space), state -> <strong>SYN_RECV</strong>.<br>
-                3. Sends SYN-ACK back to client.
+                1. Kernel network stack receives the SYN packet and identifies the destination port.<br>
+                2. It finds the matching listening socket (in LISTEN state).<br>
+                3. Checks SYN queue: If not full, the kernel creates a "request socket" (<code>struct request_sock</code>), populates it with connection info (IPs, ports, sequence numbers), adds it to the SYN queue, and sets its state to <strong>SYN_RECV</strong>.<br>
+                4. Server kernel sends a SYN-ACK packet back to the client (containing server's sequence number and acknowledging client's SYN). SYN cookies might be used if the queue is potentially full.
             `);
 
             setTimeout(() => {
                 if (serverListenSocketState === 'LISTEN') {
                     synQueueContent.push({ state: 'SYN_RECV' });
                     updateQueueUI(synQueue, synQueueContent, 'ReqSock');
-                    animatePacket('SYN-ACK', 'server-to-client'); // Uses updated function
+                    animatePacket('SYN-ACK', 'server-to-client');
 
                      setTimeout(() => {
                          if (clientSocketState === 'SYN_SENT') {
                              clientSocketState = 'ESTABLISHED';
                              updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'connect() completes');
-                             animatePacket('ACK', 'client-to-server'); // Uses updated function
+                             animatePacket('ACK', 'client-to-server');
                              setExplanation(`
                                 <strong>Handshake Part 2 & 3: SYN-ACK and ACK</strong><br>
                                 <strong>Client Receives SYN-ACK:</strong><br>
-                                1. Client matches SYN-ACK.<br>
-                                2. Sends final ACK.<br>
-                                3. Client socket -> <strong>ESTABLISHED</strong>. <code>connect()</code> returns.<br>
+                                1. Client kernel matches the SYN-ACK (correct sequence/ack numbers) to the socket in SYN_SENT state.<br>
+                                2. Client kernel sends the final ACK packet to the server, acknowledging the server's SYN.<br>
+                                3. Client socket transitions to <strong>ESTABLISHED</strong> state. The application's blocking <code>connect()</code> call returns successfully.<br>
                                 <strong>Server Receives ACK:</strong><br>
-                                1. Server matches ACK to <code>request_sock</code> in SYN Queue.<br>
-                                2. Creates full connection <code>struct sock</code>, state -> <strong>ESTABLISHED</strong>.<br>
-                                3. Moves new socket to Accept Queue (if space).<br>
-                                4. Destroys <code>request_sock</code>.
+                                1. Server kernel receives the ACK and finds the matching request socket in the SYN queue (state SYN_RECV).<br>
+                                2. Checks Accept queue: If not full, the kernel creates a full, new connection socket (<code>struct sock</code>), initializes it using information from the request socket, sets its state to <strong>ESTABLISHED</strong>, and moves it to the Accept queue.<br>
+                                3. The original request socket (<code>struct request_sock</code>) is removed from the SYN queue and destroyed.<br>
+                                4. The listening socket is woken up if the application was blocked in <code>accept()</code>.
                              `);
 
                              setTimeout(() => {
@@ -492,15 +760,17 @@
                                          acceptQueueContent.push({ state: 'ESTABLISHED' });
                                          updateQueueUI(synQueue, synQueueContent, 'ReqSock');
                                          updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
-                                         btnAccept.disabled = false;
-                                         console.log("Handshake Complete, connection in Accept Queue");
+                                         btnAccept.disabled = false; // *** Enable next button ***
+                                         console.log("Handshake Complete, connection in Accept Queue, Accept button enabled:", !btnAccept.disabled);
                                      }
+                                 } else {
+                                     console.warn("SYN queue empty when server expected to receive ACK."); // Added warning
                                  }
-                             }, 700);
+                             }, 700); // Server receives ACK
                          }
-                     }, 700);
+                     }, 700); // Client receives SYN-ACK
                 }
-            }, 700);
+            }, 700); // Server receives SYN
 
             btnConnect.disabled = true;
             step = 2;
@@ -517,25 +787,24 @@
                  serverConnSocket.classList.remove('hidden');
                  updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'accept()');
                  updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
-
                  setExplanation(`
                     <strong>Server: accept()</strong><br>
-                    1. App calls <code>accept()</code> on listening socket fd (blocks if Accept Queue empty).<br>
-                    2. Kernel takes established <code>struct sock</code> from Accept Queue.<br>
-                    3. Kernel creates a *new* file descriptor for this connection socket.<br>
-                    4. Returns the new connection fd to the application.<br>
+                    1. The application calls <code>accept()</code> on the listening socket fd (blocks if Accept Queue empty).<br>
+                    2. When a connection is available in the Accept queue (moved there after the final ACK was received), the kernel takes the first completed connection socket (<code>struct sock</code>) from the queue.<br>
+                    3. The kernel creates a *new* file descriptor that refers to this specific connection socket.<br>
+                    4. This new connection fd is returned to the application by the <code>accept()</code> call.<br>
                     5. App uses new fd for <code>send()/recv()</code> with this client. Listening fd remains active.<br>
                     6. Both client and server connection sockets -> <strong>ESTABLISHED</strong>.
                  `);
-
                  connectionEstablished = true;
+                 // *** Enable next buttons ***
                  btnSendClient.disabled = false;
                  btnSendServer.disabled = false;
                  btnCloseClient.disabled = false;
                  btnCloseServer.disabled = false;
                  btnAccept.disabled = true;
                  step = 3;
-                 console.log("Step 3: Server Accepted Connection");
+                 console.log("Step 3: Server Accepted Connection, Data/Close buttons enabled");
              }
         });
 
@@ -543,22 +812,27 @@
         btnSendClient.addEventListener('click', () => {
             if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'send()');
-            animatePacket('DATA', 'client-to-server'); // Uses updated function
+            animatePacket('DATA', 'client-to-server');
             setExplanation(`
                 <strong>Client: send()</strong><br>
-                1. App calls <code>send()</code> on connection fd.<br>
-                2. Kernel copies data to socket send buffer.<br>
-                3. TCP segments data, adds headers, passes to IP -> Link Layer.<br>
+                1. Application calls <code>send()</code> (or <code>write()</code>) with data on the connected socket's file descriptor.<br>
+                2. The kernel copies the data from the application's buffer (user space) into the socket's kernel-space <strong>send buffer</strong>.<br>
+                3. If TCP determines it can send data (considering flow control, congestion control, Nagle's algorithm etc.), it segments the data from the send buffer into TCP packets.<br>
+                4. TCP adds headers (sequence numbers, ACK numbers, window size, etc.) and passes the packet(s) to the IP layer.<br>
+                5. IP adds its header (source/destination IP) and passes to the link layer (e.g., Ethernet) for transmission.<br>
                 <strong>Server Receives Data:</strong><br>
-                1. Kernel receives packets, reassembles data in socket receive buffer.<br>
-                2. TCP sends ACKs.<br>
-                3. App uses <code>recv()</code> to read data from receive buffer.
+                (Simulated) Kernel receives packets, reassembles data in socket receive buffer. TCP sends ACKs. App uses <code>recv()</code> to read data. <br><strong>Lifecycle info box shown below!</strong>
             `);
+
+             // Simulate server receiving data AND trigger lifecycle info box
              setTimeout(() => {
                  if (serverConnSocketState === 'ESTABLISHED') {
                      updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'recv()');
+                     // *** Show the lifecycle info box ***
+                     showLifecycleInfo();
                  }
-             }, 600);
+             }, 600); // Delay matches packet arrival simulation
+
             console.log("Step 4a: Client Sent Data");
         });
 
@@ -566,17 +840,16 @@
         btnSendServer.addEventListener('click', () => {
             if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
             updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'send()');
-            animatePacket('DATA', 'server-to-client'); // Uses updated function
+            animatePacket('DATA', 'server-to-client');
              setExplanation(`
                 <strong>Server: send()</strong><br>
-                1. App calls <code>send()</code> on connection fd.<br>
-                2. Kernel copies data to socket send buffer.<br>
-                3. TCP segments, adds headers, transmits.<br>
+                1. Application calls <code>send()</code>/<code>write()</code> on the accepted connection socket's file descriptor.<br>
+                2. Data is copied to the kernel socket send buffer.<br>
+                3. Data is segmented, TCP/IP headers added, and packets transmitted (subject to TCP's logic).<br>
                 <strong>Client Receives Data:</strong><br>
-                1. Kernel receives, reassembles in socket receive buffer.<br>
-                2. TCP sends ACKs.<br>
-                3. App uses <code>recv()</code> to read data.
+                (Simulated) Client kernel receives packets, validates, places data in socket receive buffer. TCP sends ACKs. Client application uses <code>recv()</code>/<code>read()</code> to get data.
             `);
+             // Simulate client receiving data
              setTimeout(() => {
                  if (clientSocketState === 'ESTABLISHED') {
                      updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'recv()');
@@ -594,7 +867,7 @@
             if (clientSocketState === 'ESTABLISHED') {
                  clientSocketState = 'FIN_WAIT_1';
                  updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
-                 animatePacket('FIN', 'client-to-server'); // Uses updated function
+                 animatePacket('FIN', 'client-to-server');
                  setExplanation(`
                     <strong>Client: close() - Active Close</strong><br>
                     1. Client app calls <code>close()</code>.<br>
@@ -609,7 +882,7 @@
                     if (serverConnSocketState === 'ESTABLISHED') {
                         serverConnSocketState = 'CLOSE_WAIT';
                         updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'Received FIN');
-                        animatePacket('ACK', 'server-to-client'); // Uses updated function
+                        animatePacket('ACK', 'server-to-client');
 
                         setTimeout(() => {
                             if (clientSocketState === 'FIN_WAIT_1') {
@@ -634,7 +907,7 @@
             } else if (clientSocketState === 'CLOSE_WAIT') {
                  clientSocketState = 'LAST_ACK';
                  updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
-                 animatePacket('FIN', 'client-to-server'); // Uses updated function
+                 animatePacket('FIN', 'client-to-server');
                  setExplanation(`
                     <strong>Client: close() - Passive Close Response</strong><br>
                     1. Client app calls <code>close()</code> (was in CLOSE_WAIT).<br>
@@ -648,7 +921,7 @@
                      if (serverConnSocketState === 'FIN_WAIT_2') {
                          serverConnSocketState = 'TIME_WAIT';
                          updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
-                         animatePacket('ACK', 'server-to-client'); // Uses updated function
+                         animatePacket('ACK', 'server-to-client');
 
                          setTimeout(() => {
                              if (clientSocketState === 'LAST_ACK') {
@@ -696,7 +969,7 @@
             if (serverConnSocketState === 'ESTABLISHED') {
                 serverConnSocketState = 'FIN_WAIT_1';
                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
-                animatePacket('FIN', 'server-to-client'); // Uses updated function
+                animatePacket('FIN', 'server-to-client');
                 setExplanation(`
                     <strong>Server: close(conn_fd) - Active Close</strong><br>
                     1. Server app calls <code>close()</code> on connection fd.<br>
@@ -711,7 +984,7 @@
                      if (clientSocketState === 'ESTABLISHED') {
                          clientSocketState = 'CLOSE_WAIT';
                          updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'Received FIN');
-                         animatePacket('ACK', 'client-to-server'); // Uses updated function
+                         animatePacket('ACK', 'client-to-server');
 
                          setTimeout(() => {
                              if (serverConnSocketState === 'FIN_WAIT_1') {
@@ -736,7 +1009,7 @@
             } else if (serverConnSocketState === 'CLOSE_WAIT') {
                 serverConnSocketState = 'LAST_ACK';
                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
-                animatePacket('FIN', 'server-to-client'); // Uses updated function
+                animatePacket('FIN', 'server-to-client');
                 setExplanation(`
                     <strong>Server: close(conn_fd) - Passive Close Response</strong><br>
                     1. Server app calls <code>close()</code> (was in CLOSE_WAIT).<br>
@@ -751,7 +1024,7 @@
                     if (clientSocketState === 'FIN_WAIT_2') {
                         clientSocketState = 'TIME_WAIT';
                         updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
-                        animatePacket('ACK', 'client-to-server'); // Uses updated function
+                        animatePacket('ACK', 'client-to-server');
 
                         setTimeout(() => {
                             if (serverConnSocketState === 'LAST_ACK') {
@@ -817,8 +1090,113 @@
 
 
         // --- Initialization ---
-        btnReset.addEventListener('click', resetVisualization);
+        // Ensure event listeners are attached after the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', (event) => {
+             console.log("DOM fully loaded and parsed");
+             // Attach listeners here
+             btnReset.addEventListener('click', resetVisualization);
+             btnThemeToggle.addEventListener('click', toggleTheme);
+             btnSocketBind.addEventListener('click', () => {
+                if (step !== -1) return;
+                if (!audioStarted) {
+                    // initSynth(); // No longer needed
+                    Tone.start().then(() => { audioStarted = true; playSound('G4', '8n'); }).catch(e => console.error(e));
+                } else { playSound('G4', '8n'); }
+                serverListenSocketState = 'BOUND';
+                updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'socket(), bind()');
+                setExplanation(`<strong>Server: socket() & bind()</strong><br>1. <strong><code>socket()</code></strong>: App requests endpoint...<br>2. <strong><code>bind()</code></strong>: App assigns IP/Port...`);
+                btnSocketBind.disabled = true; btnListen.disabled = false; step = 0; console.log("Step 0 done, Listen enabled:", !btnListen.disabled);
+             });
+             btnListen.addEventListener('click', () => {
+                if (step !== 0) return;
+                serverListenSocketState = 'LISTEN';
+                updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'listen()');
+                setExplanation(`<strong>Server: listen()</strong><br>1. <strong><code>listen()</code></strong>: Marks socket as passive...<br>2. Kernel allocates <strong>SYN Queue</strong> and <strong>Accept Queue</strong>...`);
+                btnListen.disabled = true; btnConnect.disabled = false; step = 1; console.log("Step 1 done, Connect enabled:", !btnConnect.disabled);
+             });
+             btnConnect.addEventListener('click', () => { /* Full handler code */
+                if (step !== 1) return;
+                clientSocketState = 'SYN_SENT';
+                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'socket(), connect()');
+                animatePacket('SYN', 'client-to-server');
+                setExplanation(`<strong>Client: connect() & SYN Sent</strong><br>...<br><strong>Server Receives SYN:</strong><br>...`);
+                setTimeout(() => {
+                    if (serverListenSocketState === 'LISTEN') {
+                        synQueueContent.push({ state: 'SYN_RECV' }); updateQueueUI(synQueue, synQueueContent, 'ReqSock'); animatePacket('SYN-ACK', 'server-to-client');
+                        setTimeout(() => {
+                            if (clientSocketState === 'SYN_SENT') {
+                                clientSocketState = 'ESTABLISHED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'connect() completes'); animatePacket('ACK', 'client-to-server');
+                                setExplanation(`<strong>Handshake Part 2 & 3: SYN-ACK and ACK</strong><br>...<br><strong>Server Receives ACK:</strong><br>...`);
+                                setTimeout(() => {
+                                    if (synQueueContent.length > 0) {
+                                        const reqSock = synQueueContent.shift();
+                                        if (reqSock) { acceptQueueContent.push({ state: 'ESTABLISHED' }); updateQueueUI(synQueue, synQueueContent, 'ReqSock'); updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock'); btnAccept.disabled = false; console.log("Handshake Complete, Accept enabled:", !btnAccept.disabled); }
+                                    }
+                                }, 700);
+                            }
+                        }, 700);
+                    }
+                }, 700);
+                btnConnect.disabled = true; step = 2; console.log("Step 2 done");
+             });
+             btnAccept.addEventListener('click', () => { /* Full handler code */
+                 if (step !== 2 || acceptQueueContent.length === 0) return;
+                 const acceptedSock = acceptQueueContent.shift();
+                 if (acceptedSock) {
+                     serverConnSocketState = 'ESTABLISHED'; serverConnSocket.classList.remove('hidden'); updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'accept()'); updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
+                     setExplanation(`<strong>Server: accept()</strong><br>1. App calls <code>accept()</code>...<br>2. Kernel takes socket from Accept Queue...<br>3. Kernel creates new fd...<br>4. Returns new fd...<br>5. App uses new fd...<br>6. Both sockets -> <strong>ESTABLISHED</strong>.`);
+                     connectionEstablished = true; btnSendClient.disabled = false; btnSendServer.disabled = false; btnCloseClient.disabled = false; btnCloseServer.disabled = false; btnAccept.disabled = true; step = 3; console.log("Step 3 done, Data/Close enabled");
+                 }
+             });
+             btnSendClient.addEventListener('click', () => { /* Full handler code */
+                if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
+                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'send()'); animatePacket('DATA', 'client-to-server');
+                setExplanation(`<strong>Client: send()</strong><br>...<br><strong>Server Receives Data:</strong><br>...<br><strong>Lifecycle info box shown below!</strong>`);
+                setTimeout(() => { if (serverConnSocketState === 'ESTABLISHED') { updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'recv()'); showLifecycleInfo(); } }, 600);
+                console.log("Step 4a done");
+             });
+             btnSendServer.addEventListener('click', () => { /* Full handler code */
+                 if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
+                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'send()'); animatePacket('DATA', 'server-to-client');
+                 setExplanation(`<strong>Server: send()</strong><br>...<br><strong>Client Receives Data:</strong><br>...`);
+                 setTimeout(() => { if (clientSocketState === 'ESTABLISHED') { updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'recv()'); } }, 600);
+                 console.log("Step 4b done");
+             });
+             btnCloseClient.addEventListener('click', () => { /* Full handler code */
+                 if ((step < 3) || !connectionEstablished || clientClosing) return; clientClosing = true; btnSendClient.disabled = true;
+                 if (clientSocketState === 'ESTABLISHED') {
+                     clientSocketState = 'FIN_WAIT_1'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()'); animatePacket('FIN', 'client-to-server'); setExplanation(`<strong>Client: close() - Active Close</strong><br>...`);
+                     setTimeout(() => { if (serverConnSocketState === 'ESTABLISHED') { serverConnSocketState = 'CLOSE_WAIT'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'Received FIN'); animatePacket('ACK', 'server-to-client'); setTimeout(() => { if (clientSocketState === 'FIN_WAIT_1') { clientSocketState = 'FIN_WAIT_2'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client Receives ACK for FIN</strong><br>...`); console.log("Client FIN_WAIT_2, Server CLOSE_WAIT"); checkEnableCloseListener(); } }, 700); } else if (serverClosing) { handleSimultaneousCloseReceive('client', 'FIN'); } }, 700);
+                 } else if (clientSocketState === 'CLOSE_WAIT') {
+                     clientSocketState = 'LAST_ACK'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()'); animatePacket('FIN', 'client-to-server'); setExplanation(`<strong>Client: close() - Passive Close Response</strong><br>...`);
+                     setTimeout(() => { if (serverConnSocketState === 'FIN_WAIT_2') { serverConnSocketState = 'TIME_WAIT'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); animatePacket('ACK', 'server-to-client'); setTimeout(() => { if (clientSocketState === 'LAST_ACK') { clientSocketState = 'CLOSED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client Receives Final ACK & Closes</strong><br>...`); console.log("Client CLOSED, Server TIME_WAIT"); checkEnableCloseListener(); setTimeout(() => { if (serverConnSocketState === 'TIME_WAIT') { serverConnSocketState = 'CLOSED'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); serverConnSocket.classList.add('hidden'); setExplanation(`<strong>Server TIME_WAIT Expires</strong><br>...`); console.log("Server CLOSED"); checkEnableCloseListener(); } }, 2000); } }, 700); } }, 700);
+                 }
+                 btnCloseClient.disabled = true; step = 4; console.log("Step 5a done");
+             });
+             btnCloseServer.addEventListener('click', () => { /* Full handler code */
+                 if ((step < 3) || !connectionEstablished || serverClosing) return; serverClosing = true; btnSendServer.disabled = true;
+                 if (serverConnSocketState === 'ESTABLISHED') {
+                     serverConnSocketState = 'FIN_WAIT_1'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)'); animatePacket('FIN', 'server-to-client'); setExplanation(`<strong>Server: close(conn_fd) - Active Close</strong><br>...`);
+                     setTimeout(() => { if (clientSocketState === 'ESTABLISHED') { clientSocketState = 'CLOSE_WAIT'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'Received FIN'); animatePacket('ACK', 'client-to-server'); setTimeout(() => { if (serverConnSocketState === 'FIN_WAIT_1') { serverConnSocketState = 'FIN_WAIT_2'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); setExplanation(`<strong>Server Receives ACK for FIN</strong><br>...`); console.log("Server FIN_WAIT_2, Client CLOSE_WAIT"); checkEnableCloseListener(); } }, 700); } else if (clientClosing) { handleSimultaneousCloseReceive('server', 'FIN'); } }, 700);
+                 } else if (serverConnSocketState === 'CLOSE_WAIT') {
+                     serverConnSocketState = 'LAST_ACK'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)'); animatePacket('FIN', 'server-to-client'); setExplanation(`<strong>Server: close(conn_fd) - Passive Close Response</strong><br>...`);
+                     setTimeout(() => { if (clientSocketState === 'FIN_WAIT_2') { clientSocketState = 'TIME_WAIT'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); animatePacket('ACK', 'client-to-server'); setTimeout(() => { if (serverConnSocketState === 'LAST_ACK') { serverConnSocketState = 'CLOSED'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); serverConnSocket.classList.add('hidden'); setExplanation(`<strong>Server Receives Final ACK & Closes</strong><br>...`); console.log("Server CLOSED, Client TIME_WAIT"); checkEnableCloseListener(); setTimeout(() => { if (clientSocketState === 'TIME_WAIT') { clientSocketState = 'CLOSED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client TIME_WAIT Expires</strong><br>...`); console.log("Client CLOSED"); checkEnableCloseListener(); } }, 2000); } }, 700); } }, 700);
+                 }
+                 btnCloseServer.disabled = true; step = 4; console.log("Step 5b done");
+             });
+             btnCloseListen.addEventListener('click', () => { /* Full handler code */
+                 if (listenerClosed || serverListenSocketState !== 'LISTEN') return; listenerClosed = true; serverListenSocketState = 'CLOSED'; updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'close(listen_fd)');
+                 setExplanation(`<strong>Server: close(listen_fd)</strong><br>1. Server application calls <code>close()</code>...<br>2. Kernel marks listening socket closed...<br>3. No new SYNs accepted...<br>4. Established connections unaffected...<br>5. Listening socket -> <strong>CLOSED</strong>. Click Reset.`);
+                 btnCloseListen.disabled = true; step = 5; console.log("Step 6 done");
+             });
+
+             // Initial setup on load - redundant if window.onload is used, but safe
+             // resetVisualization(); // Called by window.onload instead
+        });
+
+        // Use window.onload for final setup after all resources are loaded
         window.onload = resetVisualization;
+
 
     </script>
 </body>
