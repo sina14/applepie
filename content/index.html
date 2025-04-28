@@ -15,10 +15,10 @@
         // Set the theme class on the HTML element BEFORE the body renders
         if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
           document.documentElement.classList.add('dark');
-          console.log("Applying dark theme on load");
+          // console.log("Applying dark theme on load");
         } else {
           document.documentElement.classList.remove('dark'); // Explicitly remove if light
-           console.log("Applying light theme on load");
+           // console.log("Applying light theme on load");
         }
     </script>
     <style>
@@ -425,7 +425,6 @@
         const PACKET_DISPLAY_DURATION = 2000;
         const PACKET_FADE_DURATION = 500;
         let audioStarted = false; // Flag to track if Tone.js context is started
-        // let synth = null; // Removed global synth
 
         // --- Utility Functions ---
 
@@ -434,8 +433,13 @@
             // Ensure audio context is started (usually requires user interaction first)
             if (!audioStarted) {
                 try {
-                    await Tone.start();
-                    console.log("Audio context started by Tone.start()");
+                    // Check if context is already running (e.g., from previous interaction)
+                    if (Tone.context.state !== 'running') {
+                        await Tone.start();
+                        console.log("Audio context started by Tone.start()");
+                    } else {
+                         console.log("Audio context already running.");
+                    }
                     audioStarted = true;
                 } catch (e) {
                     console.error("Error starting Tone.js audio context:", e);
@@ -450,16 +454,15 @@
                      envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.1 },
                  }).toDestination();
 
-                // Play the sound now
+                // Play the sound now, using Tone.now() for timing relative to the audio context
                 tempSynth.triggerAttackRelease(note, duration, Tone.now());
-                console.log(`Played sound: ${note}`);
+                // console.log(`Played sound: ${note} at ${Tone.now()}`); // Log timing if needed
 
                 // Schedule disposal shortly after the release ends
-                 // Convert duration string (like '16n') to seconds, add release time, add buffer
                 const durationSeconds = Tone.Time(duration).toSeconds();
-                const releaseSeconds = tempSynth.envelope.release; // Assuming release is a number in seconds
+                const releaseSeconds = tempSynth.envelope.release;
                 const totalSoundDuration = durationSeconds + releaseSeconds;
-                const disposeDelay = (totalSoundDuration + 0.1) * 1000; // Delay in ms
+                const disposeDelay = (totalSoundDuration + 0.1) * 1000; // Delay in ms + buffer
 
                 setTimeout(() => {
                     tempSynth.dispose();
@@ -467,7 +470,7 @@
                 }, disposeDelay);
 
             } catch (e) {
-                 console.error("Error playing sound with Tone.js:", e);
+                 console.error(`Error playing sound ${note} with Tone.js:`, e);
             }
         }
 
@@ -534,8 +537,8 @@
             stateElement.textContent = state;
             syscallElement.textContent = syscallText ? `Syscall: ${syscallText}` : '';
 
-            // Play sound if state actually changed
-            if (previousState !== state && previousState !== '' && audioStarted) { // Avoid playing on initial setup or before audio starts
+            // Play sound if state actually changed and audio context is ready
+            if (previousState !== state && previousState !== '' && audioStarted) {
                 playSound('E5', '32n'); // Play a slightly different note for state changes
             }
         }
@@ -569,7 +572,9 @@
          */
         function animatePacket(type, direction) {
             // Play sound when packet is "sent" (animation starts)
-            playSound('C5', '16n'); // Pop sound for packets
+            if (audioStarted) { // Only play if context is ready
+                playSound('C5', '16n'); // Pop sound for packets
+            }
 
             const packet = document.createElement('span');
             packet.classList.add('packet', `packet-${type.toLowerCase()}`);
@@ -662,541 +667,449 @@
 
 
         // --- Event Handlers (Explanations restored & button enabling verified) ---
+        // Wrap event listener attachments in DOMContentLoaded
 
-        // 0. Server Socket & Bind
-        btnSocketBind.addEventListener('click', () => {
-            if (step !== -1) return;
-
-            // Initialize audio context on first user interaction if not already done
-            if (!audioStarted) {
-                Tone.start().then(() => {
-                    console.log("Audio context started by user interaction.");
-                    audioStarted = true;
-                    playSound('G4', '8n'); // Play a slightly longer initial sound
-                }).catch(e => console.error("Error starting audio context:", e));
-            } else {
-                 playSound('G4', '8n'); // Play sound even if context was already started
-            }
-
-
-            serverListenSocketState = 'BOUND';
-            updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'socket(), bind()');
-            setExplanation(`
-                <strong>Server: socket() & bind()</strong><br>
-                1. <strong><code>socket()</code></strong>: The application requests a communication endpoint from the kernel. The kernel creates the core data structures (<code>struct socket</code>, which points to a protocol-specific <code>struct sock</code> like <code>tcp_sock</code>) to manage the connection state, buffers, etc. It returns a file descriptor (fd) to the application.<br>
-                2. <strong><code>bind()</code></strong>: The application assigns a specific local IP address and port number to the created socket fd. The kernel verifies the address/port usability and stores this information within the socket structure. The socket is now associated with a network interface and port, but it's not yet listening for incoming connections.
-            `);
-            btnSocketBind.disabled = true;
-            btnListen.disabled = false; // *** Enable next button ***
-            step = 0;
-            console.log("Step 0: Server Socket Created and Bound, Listen button enabled:", !btnListen.disabled);
-        });
-
-
-        // 1. Server Listen
-        btnListen.addEventListener('click', () => {
-            if (step !== 0) return;
-            serverListenSocketState = 'LISTEN';
-            updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'listen()');
-            setExplanation(`
-                <strong>Server: listen()</strong><br>
-                1. <strong><code>listen()</code></strong>: The application marks the bound socket as a passive socket, ready to accept incoming connection requests. <br>
-                2. The kernel allocates memory for two crucial queues associated with this listening socket:
-                   - <strong>SYN Queue</strong>: Stores incomplete connection requests (represented by <code>struct request_sock</code> or similar lightweight structures) after receiving the initial SYN packet from a client. This queue has a limited size (controlled by <code>net.ipv4.tcp_max_syn_backlog</code> sysctl).
-                   - <strong>Accept Queue</strong>: Stores fully established connections (represented by newly created <code>struct sock</code> structures) that have completed the three-way handshake and are waiting for the application to retrieve them via the <code>accept()</code> system call. The size is limited by the <code>backlog</code> argument passed to <code>listen()</code>.
-            `);
-            btnListen.disabled = true;
-            btnConnect.disabled = false; // *** Enable next button ***
-            step = 1;
-            console.log("Step 1: Server Listening, Connect button enabled:", !btnConnect.disabled);
-        });
-
-        // 2. Client Connect (Initiates 3-way Handshake)
-        btnConnect.addEventListener('click', () => {
-            if (step !== 1) return;
-            clientSocketState = 'SYN_SENT';
-            updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'socket(), connect()');
-            animatePacket('SYN', 'client-to-server');
-            setExplanation(`
-                <strong>Client: connect() & SYN Sent</strong><br>
-                1. <code>socket()</code>: Kernel creates a client socket (file descriptor returned).<br>
-                2. <code>connect()</code>: Initiates the TCP three-way handshake. The client kernel picks an ephemeral source port, creates a SYN packet containing the server's IP/port and its own sequence number, and sends it.<br>
-                3. Client socket enters <strong>SYN_SENT</strong> state, waiting for a SYN-ACK.<br>
-                <strong>Server Receives SYN:</strong><br>
-                1. Kernel network stack receives the SYN packet and identifies the destination port.<br>
-                2. It finds the matching listening socket (in LISTEN state).<br>
-                3. Checks SYN queue: If not full, the kernel creates a "request socket" (<code>struct request_sock</code>), populates it with connection info (IPs, ports, sequence numbers), adds it to the SYN queue, and sets its state to <strong>SYN_RECV</strong>.<br>
-                4. Server kernel sends a SYN-ACK packet back to the client (containing server's sequence number and acknowledging client's SYN). SYN cookies might be used if the queue is potentially full.
-            `);
-
-            setTimeout(() => {
-                if (serverListenSocketState === 'LISTEN') {
-                    synQueueContent.push({ state: 'SYN_RECV' });
-                    updateQueueUI(synQueue, synQueueContent, 'ReqSock');
-                    animatePacket('SYN-ACK', 'server-to-client');
-
-                     setTimeout(() => {
-                         if (clientSocketState === 'SYN_SENT') {
-                             clientSocketState = 'ESTABLISHED';
-                             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'connect() completes');
-                             animatePacket('ACK', 'client-to-server');
-                             setExplanation(`
-                                <strong>Handshake Part 2 & 3: SYN-ACK and ACK</strong><br>
-                                <strong>Client Receives SYN-ACK:</strong><br>
-                                1. Client kernel matches the SYN-ACK (correct sequence/ack numbers) to the socket in SYN_SENT state.<br>
-                                2. Client kernel sends the final ACK packet to the server, acknowledging the server's SYN.<br>
-                                3. Client socket transitions to <strong>ESTABLISHED</strong> state. The application's blocking <code>connect()</code> call returns successfully.<br>
-                                <strong>Server Receives ACK:</strong><br>
-                                1. Server kernel receives the ACK and finds the matching request socket in the SYN queue (state SYN_RECV).<br>
-                                2. Checks Accept queue: If not full, the kernel creates a full, new connection socket (<code>struct sock</code>), initializes it using information from the request socket, sets its state to <strong>ESTABLISHED</strong>, and moves it to the Accept queue.<br>
-                                3. The original request socket (<code>struct request_sock</code>) is removed from the SYN queue and destroyed.<br>
-                                4. The listening socket is woken up if the application was blocked in <code>accept()</code>.
-                             `);
-
-                             setTimeout(() => {
-                                 if (synQueueContent.length > 0) {
-                                     const reqSock = synQueueContent.shift();
-                                     if (reqSock) {
-                                         acceptQueueContent.push({ state: 'ESTABLISHED' });
-                                         updateQueueUI(synQueue, synQueueContent, 'ReqSock');
-                                         updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
-                                         btnAccept.disabled = false; // *** Enable next button ***
-                                         console.log("Handshake Complete, connection in Accept Queue, Accept button enabled:", !btnAccept.disabled);
-                                     }
-                                 } else {
-                                     console.warn("SYN queue empty when server expected to receive ACK."); // Added warning
-                                 }
-                             }, 700); // Server receives ACK
-                         }
-                     }, 700); // Client receives SYN-ACK
-                }
-            }, 700); // Server receives SYN
-
-            btnConnect.disabled = true;
-            step = 2;
-            console.log("Step 2: Connect Initiated (SYN sent)");
-        });
-
-        // 3. Server Accept
-        btnAccept.addEventListener('click', () => {
-             if (step !== 2 || acceptQueueContent.length === 0) return;
-
-             const acceptedSock = acceptQueueContent.shift();
-             if (acceptedSock) {
-                 serverConnSocketState = 'ESTABLISHED';
-                 serverConnSocket.classList.remove('hidden');
-                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'accept()');
-                 updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
-                 setExplanation(`
-                    <strong>Server: accept()</strong><br>
-                    1. The application calls <code>accept()</code> on the listening socket fd (blocks if Accept Queue empty).<br>
-                    2. When a connection is available in the Accept queue (moved there after the final ACK was received), the kernel takes the first completed connection socket (<code>struct sock</code>) from the queue.<br>
-                    3. The kernel creates a *new* file descriptor that refers to this specific connection socket.<br>
-                    4. This new connection fd is returned to the application by the <code>accept()</code> call.<br>
-                    5. App uses new fd for <code>send()/recv()</code> with this client. Listening fd remains active.<br>
-                    6. Both client and server connection sockets -> <strong>ESTABLISHED</strong>.
-                 `);
-                 connectionEstablished = true;
-                 // *** Enable next buttons ***
-                 btnSendClient.disabled = false;
-                 btnSendServer.disabled = false;
-                 btnCloseClient.disabled = false;
-                 btnCloseServer.disabled = false;
-                 btnAccept.disabled = true;
-                 step = 3;
-                 console.log("Step 3: Server Accepted Connection, Data/Close buttons enabled");
-             }
-        });
-
-        // 4a. Client Send Data
-        btnSendClient.addEventListener('click', () => {
-            if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
-            updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'send()');
-            animatePacket('DATA', 'client-to-server');
-            setExplanation(`
-                <strong>Client: send()</strong><br>
-                1. Application calls <code>send()</code> (or <code>write()</code>) with data on the connected socket's file descriptor.<br>
-                2. The kernel copies the data from the application's buffer (user space) into the socket's kernel-space <strong>send buffer</strong>.<br>
-                3. If TCP determines it can send data (considering flow control, congestion control, Nagle's algorithm etc.), it segments the data from the send buffer into TCP packets.<br>
-                4. TCP adds headers (sequence numbers, ACK numbers, window size, etc.) and passes the packet(s) to the IP layer.<br>
-                5. IP adds its header (source/destination IP) and passes to the link layer (e.g., Ethernet) for transmission.<br>
-                <strong>Server Receives Data:</strong><br>
-                (Simulated) Kernel receives packets, reassembles data in socket receive buffer. TCP sends ACKs. App uses <code>recv()</code> to read data. <br><strong>Lifecycle info box shown below!</strong>
-            `);
-
-             // Simulate server receiving data AND trigger lifecycle info box
-             setTimeout(() => {
-                 if (serverConnSocketState === 'ESTABLISHED') {
-                     updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'recv()');
-                     // *** Show the lifecycle info box ***
-                     showLifecycleInfo();
-                 }
-             }, 600); // Delay matches packet arrival simulation
-
-            console.log("Step 4a: Client Sent Data");
-        });
-
-        // 4b. Server Send Data
-        btnSendServer.addEventListener('click', () => {
-            if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
-            updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'send()');
-            animatePacket('DATA', 'server-to-client');
-             setExplanation(`
-                <strong>Server: send()</strong><br>
-                1. Application calls <code>send()</code>/<code>write()</code> on the accepted connection socket's file descriptor.<br>
-                2. Data is copied to the kernel socket send buffer.<br>
-                3. Data is segmented, TCP/IP headers added, and packets transmitted (subject to TCP's logic).<br>
-                <strong>Client Receives Data:</strong><br>
-                (Simulated) Client kernel receives packets, validates, places data in socket receive buffer. TCP sends ACKs. Client application uses <code>recv()</code>/<code>read()</code> to get data.
-            `);
-             // Simulate client receiving data
-             setTimeout(() => {
-                 if (clientSocketState === 'ESTABLISHED') {
-                     updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'recv()');
-                 }
-             }, 600);
-            console.log("Step 4b: Server Sent Data");
-        });
-
-        // 5a. Client Close
-        btnCloseClient.addEventListener('click', () => {
-            if ((step < 3) || !connectionEstablished || clientClosing) return;
-            clientClosing = true;
-            btnSendClient.disabled = true;
-
-            if (clientSocketState === 'ESTABLISHED') {
-                 clientSocketState = 'FIN_WAIT_1';
-                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
-                 animatePacket('FIN', 'client-to-server');
-                 setExplanation(`
-                    <strong>Client: close() - Active Close</strong><br>
-                    1. Client app calls <code>close()</code>.<br>
-                    2. Kernel sends FIN.<br>
-                    3. Client socket -> <strong>FIN_WAIT_1</strong>.<br>
-                    <strong>Server Receives FIN:</strong><br>
-                    1. Server kernel gets FIN, sends ACK.<br>
-                    2. Server socket -> <strong>CLOSE_WAIT</strong>. Server app notified (<code>recv()</code> returns 0).
-                 `);
-
-                setTimeout(() => {
-                    if (serverConnSocketState === 'ESTABLISHED') {
-                        serverConnSocketState = 'CLOSE_WAIT';
-                        updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'Received FIN');
-                        animatePacket('ACK', 'server-to-client');
-
-                        setTimeout(() => {
-                            if (clientSocketState === 'FIN_WAIT_1') {
-                                clientSocketState = 'FIN_WAIT_2';
-                                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
-                                setExplanation(`
-                                    <strong>Client Receives ACK for FIN</strong><br>
-                                    1. Client gets ACK.<br>
-                                    2. Client socket -> <strong>FIN_WAIT_2</strong>. Waits for server's FIN.<br>
-                                    <strong>Server in CLOSE_WAIT:</strong><br>
-                                    Server app should call <code>close()</code> on connection fd.
-                                `);
-                                console.log("Client in FIN_WAIT_2, Server in CLOSE_WAIT");
-                                checkEnableCloseListener();
-                            }
-                        }, 700);
-                    } else if (serverClosing) {
-                         handleSimultaneousCloseReceive('client', 'FIN');
-                    }
-                }, 700);
-
-            } else if (clientSocketState === 'CLOSE_WAIT') {
-                 clientSocketState = 'LAST_ACK';
-                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
-                 animatePacket('FIN', 'client-to-server');
-                 setExplanation(`
-                    <strong>Client: close() - Passive Close Response</strong><br>
-                    1. Client app calls <code>close()</code> (was in CLOSE_WAIT).<br>
-                    2. Kernel sends FIN.<br>
-                    3. Client socket -> <strong>LAST_ACK</strong>. Waits for final ACK.<br>
-                    <strong>Server Receives FIN:</strong><br>
-                    1. Server (in FIN_WAIT_2) gets FIN, sends final ACK.<br>
-                    2. Server socket -> <strong>TIME_WAIT</strong>.
-                 `);
-                 setTimeout(() => {
-                     if (serverConnSocketState === 'FIN_WAIT_2') {
-                         serverConnSocketState = 'TIME_WAIT';
-                         updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
-                         animatePacket('ACK', 'server-to-client');
-
-                         setTimeout(() => {
-                             if (clientSocketState === 'LAST_ACK') {
-                                 clientSocketState = 'CLOSED';
-                                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
-                                 setExplanation(`
-                                    <strong>Client Receives Final ACK & Closes</strong><br>
-                                    1. Client gets final ACK.<br>
-                                    2. Client socket -> <strong>CLOSED</strong>.<br>
-                                    <strong>Server in TIME_WAIT:</strong><br>
-                                    Server waits 2*MSL then -> CLOSED.
-                                 `);
-                                 console.log("Client CLOSED, Server TIME_WAIT");
-                                 checkEnableCloseListener();
-                                 setTimeout(() => {
-                                     if (serverConnSocketState === 'TIME_WAIT') {
-                                         serverConnSocketState = 'CLOSED';
-                                         updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
-                                         serverConnSocket.classList.add('hidden');
-                                         setExplanation(`
-                                            <strong>Server TIME_WAIT Expires</strong><br>
-                                            Server socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
-                                         `);
-                                         console.log("Server CLOSED");
-                                         checkEnableCloseListener();
-                                     }
-                                 }, 2000);
-                             }
-                         }, 700);
-                     }
-                 }, 700);
-            }
-
-            btnCloseClient.disabled = true;
-            step = 4;
-            console.log("Step 5a: Client Initiated or Responded to Close");
-        });
-
-        // 5b. Server Close Connection Socket
-        btnCloseServer.addEventListener('click', () => {
-             if ((step < 3) || !connectionEstablished || serverClosing) return;
-            serverClosing = true;
-            btnSendServer.disabled = true;
-
-            if (serverConnSocketState === 'ESTABLISHED') {
-                serverConnSocketState = 'FIN_WAIT_1';
-                updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
-                animatePacket('FIN', 'server-to-client');
-                setExplanation(`
-                    <strong>Server: close(conn_fd) - Active Close</strong><br>
-                    1. Server app calls <code>close()</code> on connection fd.<br>
-                    2. Kernel sends FIN.<br>
-                    3. Server socket -> <strong>FIN_WAIT_1</strong>.<br>
-                    <strong>Client Receives FIN:</strong><br>
-                    1. Client kernel gets FIN, sends ACK.<br>
-                    2. Client socket -> <strong>CLOSE_WAIT</strong>. Client app notified.
-                `);
-
-                 setTimeout(() => {
-                     if (clientSocketState === 'ESTABLISHED') {
-                         clientSocketState = 'CLOSE_WAIT';
-                         updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'Received FIN');
-                         animatePacket('ACK', 'client-to-server');
-
-                         setTimeout(() => {
-                             if (serverConnSocketState === 'FIN_WAIT_1') {
-                                 serverConnSocketState = 'FIN_WAIT_2';
-                                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
-                                 setExplanation(`
-                                    <strong>Server Receives ACK for FIN</strong><br>
-                                    1. Server gets ACK.<br>
-                                    2. Server socket -> <strong>FIN_WAIT_2</strong>. Waits for client's FIN.<br>
-                                    <strong>Client in CLOSE_WAIT:</strong><br>
-                                    Client app should call <code>close()</code>.
-                                 `);
-                                 console.log("Server in FIN_WAIT_2, Client in CLOSE_WAIT");
-                                 checkEnableCloseListener();
-                             }
-                         }, 700);
-                     } else if (clientClosing) {
-                         handleSimultaneousCloseReceive('server', 'FIN');
-                     }
-                 }, 700);
-
-            } else if (serverConnSocketState === 'CLOSE_WAIT') {
-                serverConnSocketState = 'LAST_ACK';
-                updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
-                animatePacket('FIN', 'server-to-client');
-                setExplanation(`
-                    <strong>Server: close(conn_fd) - Passive Close Response</strong><br>
-                    1. Server app calls <code>close()</code> (was in CLOSE_WAIT).<br>
-                    2. Kernel sends FIN.<br>
-                    3. Server socket -> <strong>LAST_ACK</strong>. Waits for final ACK.<br>
-                    <strong>Client Receives FIN:</strong><br>
-                    1. Client (in FIN_WAIT_2) gets FIN, sends final ACK.<br>
-                    2. Client socket -> <strong>TIME_WAIT</strong>.
-                `);
-
-                setTimeout(() => {
-                    if (clientSocketState === 'FIN_WAIT_2') {
-                        clientSocketState = 'TIME_WAIT';
-                        updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
-                        animatePacket('ACK', 'client-to-server');
-
-                        setTimeout(() => {
-                            if (serverConnSocketState === 'LAST_ACK') {
-                                serverConnSocketState = 'CLOSED';
-                                updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
-                                serverConnSocket.classList.add('hidden');
-                                setExplanation(`
-                                    <strong>Server Receives Final ACK & Closes</strong><br>
-                                    1. Server gets final ACK.<br>
-                                    2. Server socket -> <strong>CLOSED</strong>.<br>
-                                    <strong>Client in TIME_WAIT:</strong><br>
-                                    Client waits 2*MSL then -> CLOSED.
-                                 `);
-                                console.log("Server CLOSED, Client TIME_WAIT");
-                                checkEnableCloseListener();
-                                 setTimeout(() => {
-                                     if (clientSocketState === 'TIME_WAIT') {
-                                         clientSocketState = 'CLOSED';
-                                         updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
-                                         setExplanation(`
-                                            <strong>Client TIME_WAIT Expires</strong><br>
-                                            Client socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
-                                         `);
-                                         console.log("Client CLOSED");
-                                         checkEnableCloseListener();
-                                     }
-                                 }, 2000);
-                            }
-                        }, 700);
-                    }
-                }, 700);
-            }
-
-            btnCloseServer.disabled = true;
-            step = 4;
-            console.log("Step 5b: Server Initiated or Responded to Close");
-        });
-
-        // 6. Server Close Listening Socket
-        btnCloseListen.addEventListener('click', () => {
-            if (listenerClosed || serverListenSocketState !== 'LISTEN') return;
-            listenerClosed = true;
-            serverListenSocketState = 'CLOSED';
-            updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'close(listen_fd)');
-            setExplanation(`
-                <strong>Server: close(listen_fd)</strong><br>
-                1. Server application calls <code>close()</code> on the original <strong>listening</strong> socket's file descriptor.<br>
-                2. The kernel marks the listening socket as closed.<br>
-                3. No new incoming SYN packets will be accepted for this port; the SYN and Accept queues associated with this listener are effectively dismantled.<br>
-                4. Any established connections (handled by separate fds) are unaffected by closing the listener fd, but no *new* connections can be made.<br>
-                5. The listening socket transitions back to <strong>CLOSED</strong>. All server resources are now released (assuming connection sockets are also closed). Click Reset to start over.
-            `);
-            btnCloseListen.disabled = true;
-            step = 5;
-            console.log("Step 6: Server Closed Listening Socket");
-        });
-
-
-        function handleSimultaneousCloseReceive(receiver, packetType) {
-            console.log(`Simultaneous close: ${receiver} received ${packetType}`);
-             checkEnableCloseListener();
-        }
-
-
-        // --- Initialization ---
-        // Ensure event listeners are attached after the DOM is fully loaded
-        document.addEventListener('DOMContentLoaded', (event) => {
+        document.addEventListener('DOMContentLoaded', () => {
              console.log("DOM fully loaded and parsed");
-             // Attach listeners here
-             btnReset.addEventListener('click', resetVisualization);
+
+             // Attach Theme Toggle Listener
              btnThemeToggle.addEventListener('click', toggleTheme);
+             console.log("Theme toggle listener attached.");
+
+             // Attach Reset Listener
+             btnReset.addEventListener('click', resetVisualization);
+
+             // Attach Step Listeners
              btnSocketBind.addEventListener('click', () => {
                 if (step !== -1) return;
-                if (!audioStarted) {
-                    // initSynth(); // No longer needed
-                    Tone.start().then(() => { audioStarted = true; playSound('G4', '8n'); }).catch(e => console.error(e));
-                } else { playSound('G4', '8n'); }
+
+                // Initialize audio context on first user interaction if not already done
+                // Use a separate async function to handle potential errors gracefully
+                const startAudio = async () => {
+                    if (!audioStarted) {
+                        try {
+                            if (Tone.context.state !== 'running') {
+                                await Tone.start();
+                                console.log("Audio context started by user interaction.");
+                            }
+                            audioStarted = true;
+                            playSound('G4', '8n'); // Play sound after starting context
+                        } catch (e) {
+                            console.error("Error starting audio context:", e);
+                            // Potentially show a message to the user that audio couldn't start
+                        }
+                    } else {
+                        playSound('G4', '8n'); // Play sound if context was already started
+                    }
+                };
+                startAudio(); // Call the async function
+
+
                 serverListenSocketState = 'BOUND';
                 updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'socket(), bind()');
-                setExplanation(`<strong>Server: socket() & bind()</strong><br>1. <strong><code>socket()</code></strong>: App requests endpoint...<br>2. <strong><code>bind()</code></strong>: App assigns IP/Port...`);
-                btnSocketBind.disabled = true; btnListen.disabled = false; step = 0; console.log("Step 0 done, Listen enabled:", !btnListen.disabled);
-             });
-             btnListen.addEventListener('click', () => {
+                setExplanation(`
+                    <strong>Server: socket() & bind()</strong><br>
+                    1. <strong><code>socket()</code></strong>: The application requests a communication endpoint from the kernel. The kernel creates the core data structures (<code>struct socket</code>, which points to a protocol-specific <code>struct sock</code> like <code>tcp_sock</code>) to manage the connection state, buffers, etc. It returns a file descriptor (fd) to the application.<br>
+                    2. <strong><code>bind()</code></strong>: The application assigns a specific local IP address and port number to the created socket fd. The kernel verifies the address/port usability and stores this information within the socket structure. The socket is now associated with a network interface and port, but it's not yet listening for incoming connections.
+                `);
+                btnSocketBind.disabled = true;
+                btnListen.disabled = false; // *** Enable next button ***
+                step = 0;
+                console.log("Step 0: Server Socket Created and Bound, Listen button enabled:", !btnListen.disabled);
+            });
+
+
+            btnListen.addEventListener('click', () => {
                 if (step !== 0) return;
                 serverListenSocketState = 'LISTEN';
                 updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'listen()');
-                setExplanation(`<strong>Server: listen()</strong><br>1. <strong><code>listen()</code></strong>: Marks socket as passive...<br>2. Kernel allocates <strong>SYN Queue</strong> and <strong>Accept Queue</strong>...`);
-                btnListen.disabled = true; btnConnect.disabled = false; step = 1; console.log("Step 1 done, Connect enabled:", !btnConnect.disabled);
-             });
-             btnConnect.addEventListener('click', () => { /* Full handler code */
+                setExplanation(`
+                    <strong>Server: listen()</strong><br>
+                    1. <strong><code>listen()</code></strong>: The application marks the bound socket as a passive socket, ready to accept incoming connection requests. <br>
+                    2. The kernel allocates memory for two crucial queues associated with this listening socket:
+                       - <strong>SYN Queue</strong>: Stores incomplete connection requests (represented by <code>struct request_sock</code> or similar lightweight structures) after receiving the initial SYN packet from a client. This queue has a limited size (controlled by <code>net.ipv4.tcp_max_syn_backlog</code> sysctl).
+                       - <strong>Accept Queue</strong>: Stores fully established connections (represented by newly created <code>struct sock</code> structures) that have completed the three-way handshake and are waiting for the application to retrieve them via the <code>accept()</code> system call. The size is limited by the <code>backlog</code> argument passed to <code>listen()</code>.
+                `);
+                btnListen.disabled = true;
+                btnConnect.disabled = false; // *** Enable next button ***
+                step = 1;
+                console.log("Step 1: Server Listening, Connect button enabled:", !btnConnect.disabled);
+            });
+
+            btnConnect.addEventListener('click', () => {
                 if (step !== 1) return;
                 clientSocketState = 'SYN_SENT';
                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'socket(), connect()');
                 animatePacket('SYN', 'client-to-server');
-                setExplanation(`<strong>Client: connect() & SYN Sent</strong><br>...<br><strong>Server Receives SYN:</strong><br>...`);
+                setExplanation(`
+                    <strong>Client: connect() & SYN Sent</strong><br>
+                    1. <code>socket()</code>: Kernel creates a client socket (file descriptor returned).<br>
+                    2. <code>connect()</code>: Initiates the TCP three-way handshake. The client kernel picks an ephemeral source port, creates a SYN packet containing the server's IP/port and its own sequence number, and sends it.<br>
+                    3. Client socket enters <strong>SYN_SENT</strong> state, waiting for a SYN-ACK.<br>
+                    <strong>Server Receives SYN:</strong><br>
+                    1. Kernel network stack receives the SYN packet and identifies the destination port.<br>
+                    2. It finds the matching listening socket (in LISTEN state).<br>
+                    3. Checks SYN queue: If not full, the kernel creates a "request socket" (<code>struct request_sock</code>), populates it with connection info (IPs, ports, sequence numbers), adds it to the SYN queue, and sets its state to <strong>SYN_RECV</strong>.<br>
+                    4. Server kernel sends a SYN-ACK packet back to the client (containing server's sequence number and acknowledging client's SYN). SYN cookies might be used if the queue is potentially full.
+                `);
+
                 setTimeout(() => {
                     if (serverListenSocketState === 'LISTEN') {
-                        synQueueContent.push({ state: 'SYN_RECV' }); updateQueueUI(synQueue, synQueueContent, 'ReqSock'); animatePacket('SYN-ACK', 'server-to-client');
-                        setTimeout(() => {
-                            if (clientSocketState === 'SYN_SENT') {
-                                clientSocketState = 'ESTABLISHED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'connect() completes'); animatePacket('ACK', 'client-to-server');
-                                setExplanation(`<strong>Handshake Part 2 & 3: SYN-ACK and ACK</strong><br>...<br><strong>Server Receives ACK:</strong><br>...`);
-                                setTimeout(() => {
-                                    if (synQueueContent.length > 0) {
-                                        const reqSock = synQueueContent.shift();
-                                        if (reqSock) { acceptQueueContent.push({ state: 'ESTABLISHED' }); updateQueueUI(synQueue, synQueueContent, 'ReqSock'); updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock'); btnAccept.disabled = false; console.log("Handshake Complete, Accept enabled:", !btnAccept.disabled); }
-                                    }
-                                }, 700);
-                            }
-                        }, 700);
+                        synQueueContent.push({ state: 'SYN_RECV' });
+                        updateQueueUI(synQueue, synQueueContent, 'ReqSock');
+                        animatePacket('SYN-ACK', 'server-to-client');
+
+                         setTimeout(() => {
+                             if (clientSocketState === 'SYN_SENT') {
+                                 clientSocketState = 'ESTABLISHED';
+                                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'connect() completes');
+                                 animatePacket('ACK', 'client-to-server');
+                                 setExplanation(`
+                                    <strong>Handshake Part 2 & 3: SYN-ACK and ACK</strong><br>
+                                    <strong>Client Receives SYN-ACK:</strong><br>
+                                    1. Client kernel matches the SYN-ACK (correct sequence/ack numbers) to the socket in SYN_SENT state.<br>
+                                    2. Client kernel sends the final ACK packet to the server, acknowledging the server's SYN.<br>
+                                    3. Client socket transitions to <strong>ESTABLISHED</strong> state. The application's blocking <code>connect()</code> call returns successfully.<br>
+                                    <strong>Server Receives ACK:</strong><br>
+                                    1. Server kernel receives the ACK and finds the matching request socket in the SYN queue (state SYN_RECV).<br>
+                                    2. Checks Accept queue: If not full, the kernel creates a full, new connection socket (<code>struct sock</code>), initializes it using information from the request socket, sets its state to <strong>ESTABLISHED</strong>, and moves it to the Accept queue.<br>
+                                    3. The original request socket (<code>struct request_sock</code>) is removed from the SYN queue and destroyed.<br>
+                                    4. The listening socket is woken up if the application was blocked in <code>accept()</code>.
+                                 `);
+
+                                 // *** This is the critical part for enabling the next step ***
+                                 setTimeout(() => {
+                                     if (synQueueContent.length > 0) {
+                                         const reqSock = synQueueContent.shift();
+                                         if (reqSock) {
+                                             acceptQueueContent.push({ state: 'ESTABLISHED' });
+                                             updateQueueUI(synQueue, synQueueContent, 'ReqSock');
+                                             updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
+                                             btnAccept.disabled = false; // *** Enable Accept button ***
+                                             console.log("Handshake Complete, connection in Accept Queue, Accept button enabled:", !btnAccept.disabled);
+                                         }
+                                     } else {
+                                         console.warn("SYN queue empty when server expected to receive ACK."); // Added warning
+                                     }
+                                 }, 700); // Server receives ACK
+                             }
+                         }, 700); // Client receives SYN-ACK
                     }
-                }, 700);
-                btnConnect.disabled = true; step = 2; console.log("Step 2 done");
-             });
-             btnAccept.addEventListener('click', () => { /* Full handler code */
+                }, 700); // Server receives SYN
+
+                btnConnect.disabled = true;
+                step = 2;
+                console.log("Step 2: Connect Initiated (SYN sent)");
+            });
+
+            btnAccept.addEventListener('click', () => {
                  if (step !== 2 || acceptQueueContent.length === 0) return;
+
                  const acceptedSock = acceptQueueContent.shift();
                  if (acceptedSock) {
-                     serverConnSocketState = 'ESTABLISHED'; serverConnSocket.classList.remove('hidden'); updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'accept()'); updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
-                     setExplanation(`<strong>Server: accept()</strong><br>1. App calls <code>accept()</code>...<br>2. Kernel takes socket from Accept Queue...<br>3. Kernel creates new fd...<br>4. Returns new fd...<br>5. App uses new fd...<br>6. Both sockets -> <strong>ESTABLISHED</strong>.`);
-                     connectionEstablished = true; btnSendClient.disabled = false; btnSendServer.disabled = false; btnCloseClient.disabled = false; btnCloseServer.disabled = false; btnAccept.disabled = true; step = 3; console.log("Step 3 done, Data/Close enabled");
+                     serverConnSocketState = 'ESTABLISHED';
+                     serverConnSocket.classList.remove('hidden');
+                     updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'accept()');
+                     updateQueueUI(acceptQueue, acceptQueueContent, 'ConnSock');
+                     setExplanation(`
+                        <strong>Server: accept()</strong><br>
+                        1. The application calls <code>accept()</code> on the listening socket fd (blocks if Accept Queue empty).<br>
+                        2. When a connection is available in the Accept queue (moved there after the final ACK was received), the kernel takes the first completed connection socket (<code>struct sock</code>) from the queue.<br>
+                        3. The kernel creates a *new* file descriptor that refers to this specific connection socket.<br>
+                        4. This new connection fd is returned to the application by the <code>accept()</code> call.<br>
+                        5. App uses new fd for <code>send()/recv()</code> with this client. Listening fd remains active.<br>
+                        6. Both client and server connection sockets -> <strong>ESTABLISHED</strong>.
+                     `);
+                     connectionEstablished = true;
+                     // *** Enable next buttons ***
+                     btnSendClient.disabled = false;
+                     btnSendServer.disabled = false;
+                     btnCloseClient.disabled = false;
+                     btnCloseServer.disabled = false;
+                     btnAccept.disabled = true;
+                     step = 3;
+                     console.log("Step 3: Server Accepted Connection, Data/Close buttons enabled");
                  }
-             });
-             btnSendClient.addEventListener('click', () => { /* Full handler code */
+            });
+
+            btnSendClient.addEventListener('click', () => {
                 if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
-                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'send()'); animatePacket('DATA', 'client-to-server');
-                setExplanation(`<strong>Client: send()</strong><br>...<br><strong>Server Receives Data:</strong><br>...<br><strong>Lifecycle info box shown below!</strong>`);
-                setTimeout(() => { if (serverConnSocketState === 'ESTABLISHED') { updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'recv()'); showLifecycleInfo(); } }, 600);
-                console.log("Step 4a done");
-             });
-             btnSendServer.addEventListener('click', () => { /* Full handler code */
-                 if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
-                 updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'send()'); animatePacket('DATA', 'server-to-client');
-                 setExplanation(`<strong>Server: send()</strong><br>...<br><strong>Client Receives Data:</strong><br>...`);
-                 setTimeout(() => { if (clientSocketState === 'ESTABLISHED') { updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'recv()'); } }, 600);
-                 console.log("Step 4b done");
-             });
-             btnCloseClient.addEventListener('click', () => { /* Full handler code */
-                 if ((step < 3) || !connectionEstablished || clientClosing) return; clientClosing = true; btnSendClient.disabled = true;
-                 if (clientSocketState === 'ESTABLISHED') {
-                     clientSocketState = 'FIN_WAIT_1'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()'); animatePacket('FIN', 'client-to-server'); setExplanation(`<strong>Client: close() - Active Close</strong><br>...`);
-                     setTimeout(() => { if (serverConnSocketState === 'ESTABLISHED') { serverConnSocketState = 'CLOSE_WAIT'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'Received FIN'); animatePacket('ACK', 'server-to-client'); setTimeout(() => { if (clientSocketState === 'FIN_WAIT_1') { clientSocketState = 'FIN_WAIT_2'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client Receives ACK for FIN</strong><br>...`); console.log("Client FIN_WAIT_2, Server CLOSE_WAIT"); checkEnableCloseListener(); } }, 700); } else if (serverClosing) { handleSimultaneousCloseReceive('client', 'FIN'); } }, 700);
-                 } else if (clientSocketState === 'CLOSE_WAIT') {
-                     clientSocketState = 'LAST_ACK'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()'); animatePacket('FIN', 'client-to-server'); setExplanation(`<strong>Client: close() - Passive Close Response</strong><br>...`);
-                     setTimeout(() => { if (serverConnSocketState === 'FIN_WAIT_2') { serverConnSocketState = 'TIME_WAIT'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); animatePacket('ACK', 'server-to-client'); setTimeout(() => { if (clientSocketState === 'LAST_ACK') { clientSocketState = 'CLOSED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client Receives Final ACK & Closes</strong><br>...`); console.log("Client CLOSED, Server TIME_WAIT"); checkEnableCloseListener(); setTimeout(() => { if (serverConnSocketState === 'TIME_WAIT') { serverConnSocketState = 'CLOSED'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); serverConnSocket.classList.add('hidden'); setExplanation(`<strong>Server TIME_WAIT Expires</strong><br>...`); console.log("Server CLOSED"); checkEnableCloseListener(); } }, 2000); } }, 700); } }, 700);
-                 }
-                 btnCloseClient.disabled = true; step = 4; console.log("Step 5a done");
-             });
-             btnCloseServer.addEventListener('click', () => { /* Full handler code */
-                 if ((step < 3) || !connectionEstablished || serverClosing) return; serverClosing = true; btnSendServer.disabled = true;
-                 if (serverConnSocketState === 'ESTABLISHED') {
-                     serverConnSocketState = 'FIN_WAIT_1'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)'); animatePacket('FIN', 'server-to-client'); setExplanation(`<strong>Server: close(conn_fd) - Active Close</strong><br>...`);
-                     setTimeout(() => { if (clientSocketState === 'ESTABLISHED') { clientSocketState = 'CLOSE_WAIT'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'Received FIN'); animatePacket('ACK', 'client-to-server'); setTimeout(() => { if (serverConnSocketState === 'FIN_WAIT_1') { serverConnSocketState = 'FIN_WAIT_2'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); setExplanation(`<strong>Server Receives ACK for FIN</strong><br>...`); console.log("Server FIN_WAIT_2, Client CLOSE_WAIT"); checkEnableCloseListener(); } }, 700); } else if (clientClosing) { handleSimultaneousCloseReceive('server', 'FIN'); } }, 700);
-                 } else if (serverConnSocketState === 'CLOSE_WAIT') {
-                     serverConnSocketState = 'LAST_ACK'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)'); animatePacket('FIN', 'server-to-client'); setExplanation(`<strong>Server: close(conn_fd) - Passive Close Response</strong><br>...`);
-                     setTimeout(() => { if (clientSocketState === 'FIN_WAIT_2') { clientSocketState = 'TIME_WAIT'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); animatePacket('ACK', 'client-to-server'); setTimeout(() => { if (serverConnSocketState === 'LAST_ACK') { serverConnSocketState = 'CLOSED'; updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState); serverConnSocket.classList.add('hidden'); setExplanation(`<strong>Server Receives Final ACK & Closes</strong><br>...`); console.log("Server CLOSED, Client TIME_WAIT"); checkEnableCloseListener(); setTimeout(() => { if (clientSocketState === 'TIME_WAIT') { clientSocketState = 'CLOSED'; updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState); setExplanation(`<strong>Client TIME_WAIT Expires</strong><br>...`); console.log("Client CLOSED"); checkEnableCloseListener(); } }, 2000); } }, 700); } }, 700);
-                 }
-                 btnCloseServer.disabled = true; step = 4; console.log("Step 5b done");
-             });
-             btnCloseListen.addEventListener('click', () => { /* Full handler code */
-                 if (listenerClosed || serverListenSocketState !== 'LISTEN') return; listenerClosed = true; serverListenSocketState = 'CLOSED'; updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'close(listen_fd)');
-                 setExplanation(`<strong>Server: close(listen_fd)</strong><br>1. Server application calls <code>close()</code>...<br>2. Kernel marks listening socket closed...<br>3. No new SYNs accepted...<br>4. Established connections unaffected...<br>5. Listening socket -> <strong>CLOSED</strong>. Click Reset.`);
-                 btnCloseListen.disabled = true; step = 5; console.log("Step 6 done");
-             });
+                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'send()');
+                animatePacket('DATA', 'client-to-server');
+                setExplanation(`
+                    <strong>Client: send()</strong><br>
+                    1. Application calls <code>send()</code> (or <code>write()</code>) with data on the connected socket's file descriptor.<br>
+                    2. The kernel copies the data from the application's buffer (user space) into the socket's kernel-space <strong>send buffer</strong>.<br>
+                    3. If TCP determines it can send data (considering flow control, congestion control, Nagle's algorithm etc.), it segments the data from the send buffer into TCP packets.<br>
+                    4. TCP adds headers (sequence numbers, ACK numbers, window size, etc.) and passes the packet(s) to the IP layer.<br>
+                    5. IP adds its header (source/destination IP) and passes to the link layer (e.g., Ethernet) for transmission.<br>
+                    <strong>Server Receives Data:</strong><br>
+                    (Simulated) Kernel receives packets, reassembles data in socket receive buffer. TCP sends ACKs. App uses <code>recv()</code> to read data. <br><strong>Lifecycle info box shown below!</strong>
+                `);
 
-             // Initial setup on load - redundant if window.onload is used, but safe
-             // resetVisualization(); // Called by window.onload instead
+                 // Simulate server receiving data AND trigger lifecycle info box
+                 setTimeout(() => {
+                     if (serverConnSocketState === 'ESTABLISHED') {
+                         updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'recv()');
+                         // *** Show the lifecycle info box ***
+                         showLifecycleInfo();
+                     }
+                 }, 600); // Delay matches packet arrival simulation
+
+                console.log("Step 4a: Client Sent Data");
+            });
+
+            btnSendServer.addEventListener('click', () => {
+                if (step !== 3 || !connectionEstablished || clientClosing || serverClosing) return;
+                updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'send()');
+                animatePacket('DATA', 'server-to-client');
+                 setExplanation(`
+                    <strong>Server: send()</strong><br>
+                    1. Application calls <code>send()</code>/<code>write()</code> on the accepted connection socket's file descriptor.<br>
+                    2. Data is copied to the kernel socket send buffer.<br>
+                    3. Data is segmented, TCP/IP headers added, and packets transmitted (subject to TCP's logic).<br>
+                    <strong>Client Receives Data:</strong><br>
+                    (Simulated) Client kernel receives packets, validates, places data in socket receive buffer. TCP sends ACKs. Client application uses <code>recv()</code>/<code>read()</code> to get data.
+                `);
+                 // Simulate client receiving data
+                 setTimeout(() => {
+                     if (clientSocketState === 'ESTABLISHED') {
+                         updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'recv()');
+                     }
+                 }, 600);
+                console.log("Step 4b: Server Sent Data");
+            });
+
+            btnCloseClient.addEventListener('click', () => {
+                if ((step < 3) || !connectionEstablished || clientClosing) return;
+                clientClosing = true;
+                btnSendClient.disabled = true;
+
+                if (clientSocketState === 'ESTABLISHED') {
+                     clientSocketState = 'FIN_WAIT_1';
+                     updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
+                     animatePacket('FIN', 'client-to-server');
+                     setExplanation(`
+                        <strong>Client: close() - Active Close</strong><br>
+                        1. Client app calls <code>close()</code>.<br>
+                        2. Kernel sends FIN.<br>
+                        3. Client socket -> <strong>FIN_WAIT_1</strong>.<br>
+                        <strong>Server Receives FIN:</strong><br>
+                        1. Server kernel gets FIN, sends ACK.<br>
+                        2. Server socket -> <strong>CLOSE_WAIT</strong>. Server app notified (<code>recv()</code> returns 0).
+                     `);
+
+                    setTimeout(() => {
+                        if (serverConnSocketState === 'ESTABLISHED') {
+                            serverConnSocketState = 'CLOSE_WAIT';
+                            updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'Received FIN');
+                            animatePacket('ACK', 'server-to-client');
+
+                            setTimeout(() => {
+                                if (clientSocketState === 'FIN_WAIT_1') {
+                                    clientSocketState = 'FIN_WAIT_2';
+                                    updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
+                                    setExplanation(`
+                                        <strong>Client Receives ACK for FIN</strong><br>
+                                        1. Client gets ACK.<br>
+                                        2. Client socket -> <strong>FIN_WAIT_2</strong>. Waits for server's FIN.<br>
+                                        <strong>Server in CLOSE_WAIT:</strong><br>
+                                        Server app should call <code>close()</code> on connection fd.
+                                    `);
+                                    console.log("Client in FIN_WAIT_2, Server in CLOSE_WAIT");
+                                    checkEnableCloseListener();
+                                }
+                            }, 700);
+                        } else if (serverClosing) {
+                             handleSimultaneousCloseReceive('client', 'FIN');
+                        }
+                    }, 700);
+
+                } else if (clientSocketState === 'CLOSE_WAIT') {
+                     clientSocketState = 'LAST_ACK';
+                     updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'close()');
+                     animatePacket('FIN', 'client-to-server');
+                     setExplanation(`
+                        <strong>Client: close() - Passive Close Response</strong><br>
+                        1. Client app calls <code>close()</code> (was in CLOSE_WAIT).<br>
+                        2. Kernel sends FIN.<br>
+                        3. Client socket -> <strong>LAST_ACK</strong>. Waits for final ACK.<br>
+                        <strong>Server Receives FIN:</strong><br>
+                        1. Server (in FIN_WAIT_2) gets FIN, sends final ACK.<br>
+                        2. Server socket -> <strong>TIME_WAIT</strong>.
+                     `);
+                     setTimeout(() => {
+                         if (serverConnSocketState === 'FIN_WAIT_2') {
+                             serverConnSocketState = 'TIME_WAIT';
+                             updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
+                             animatePacket('ACK', 'server-to-client');
+
+                             setTimeout(() => {
+                                 if (clientSocketState === 'LAST_ACK') {
+                                     clientSocketState = 'CLOSED';
+                                     updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
+                                     setExplanation(`
+                                        <strong>Client Receives Final ACK & Closes</strong><br>
+                                        1. Client gets final ACK.<br>
+                                        2. Client socket -> <strong>CLOSED</strong>.<br>
+                                        <strong>Server in TIME_WAIT:</strong><br>
+                                        Server waits 2*MSL then -> CLOSED.
+                                     `);
+                                     console.log("Client CLOSED, Server TIME_WAIT");
+                                     checkEnableCloseListener();
+                                     setTimeout(() => {
+                                         if (serverConnSocketState === 'TIME_WAIT') {
+                                             serverConnSocketState = 'CLOSED';
+                                             updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
+                                             serverConnSocket.classList.add('hidden');
+                                             setExplanation(`
+                                                <strong>Server TIME_WAIT Expires</strong><br>
+                                                Server socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
+                                             `);
+                                             console.log("Server CLOSED");
+                                             checkEnableCloseListener();
+                                         }
+                                     }, 2000);
+                                 }
+                             }, 700);
+                         }
+                     }, 700);
+                }
+
+                btnCloseClient.disabled = true;
+                step = 4;
+                console.log("Step 5a: Client Initiated or Responded to Close");
+            });
+
+            btnCloseServer.addEventListener('click', () => {
+                 if ((step < 3) || !connectionEstablished || serverClosing) return;
+                serverClosing = true;
+                btnSendServer.disabled = true;
+
+                if (serverConnSocketState === 'ESTABLISHED') {
+                    serverConnSocketState = 'FIN_WAIT_1';
+                    updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
+                    animatePacket('FIN', 'server-to-client');
+                    setExplanation(`
+                        <strong>Server: close(conn_fd) - Active Close</strong><br>
+                        1. Server app calls <code>close()</code> on connection fd.<br>
+                        2. Kernel sends FIN.<br>
+                        3. Server socket -> <strong>FIN_WAIT_1</strong>.<br>
+                        <strong>Client Receives FIN:</strong><br>
+                        1. Client kernel gets FIN, sends ACK.<br>
+                        2. Client socket -> <strong>CLOSE_WAIT</strong>. Client app notified.
+                    `);
+
+                     setTimeout(() => {
+                         if (clientSocketState === 'ESTABLISHED') {
+                             clientSocketState = 'CLOSE_WAIT';
+                             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'Received FIN');
+                             animatePacket('ACK', 'client-to-server');
+
+                             setTimeout(() => {
+                                 if (serverConnSocketState === 'FIN_WAIT_1') {
+                                     serverConnSocketState = 'FIN_WAIT_2';
+                                     updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
+                                     setExplanation(`
+                                        <strong>Server Receives ACK for FIN</strong><br>
+                                        1. Server gets ACK.<br>
+                                        2. Server socket -> <strong>FIN_WAIT_2</strong>. Waits for client's FIN.<br>
+                                        <strong>Client in CLOSE_WAIT:</strong><br>
+                                        Client app should call <code>close()</code>.
+                                     `);
+                                     console.log("Server in FIN_WAIT_2, Client in CLOSE_WAIT");
+                                     checkEnableCloseListener();
+                                 }
+                             }, 700);
+                         } else if (clientClosing) {
+                             handleSimultaneousCloseReceive('server', 'FIN');
+                         }
+                     }, 700);
+
+                } else if (serverConnSocketState === 'CLOSE_WAIT') {
+                    serverConnSocketState = 'LAST_ACK';
+                    updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState, 'close(conn_fd)');
+                    animatePacket('FIN', 'server-to-client');
+                    setExplanation(`
+                        <strong>Server: close(conn_fd) - Passive Close Response</strong><br>
+                        1. Server app calls <code>close()</code> (was in CLOSE_WAIT).<br>
+                        2. Kernel sends FIN.<br>
+                        3. Server socket -> <strong>LAST_ACK</strong>. Waits for final ACK.<br>
+                        <strong>Client Receives FIN:</strong><br>
+                        1. Client (in FIN_WAIT_2) gets FIN, sends final ACK.<br>
+                        2. Client socket -> <strong>TIME_WAIT</strong>.
+                    `);
+
+                    setTimeout(() => {
+                        if (clientSocketState === 'FIN_WAIT_2') {
+                            clientSocketState = 'TIME_WAIT';
+                            updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
+                            animatePacket('ACK', 'client-to-server');
+
+                            setTimeout(() => {
+                                if (serverConnSocketState === 'LAST_ACK') {
+                                    serverConnSocketState = 'CLOSED';
+                                    updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
+                                    serverConnSocket.classList.add('hidden');
+                                    setExplanation(`
+                                        <strong>Server Receives Final ACK & Closes</strong><br>
+                                        1. Server gets final ACK.<br>
+                                        2. Server socket -> <strong>CLOSED</strong>.<br>
+                                        <strong>Client in TIME_WAIT:</strong><br>
+                                        Client waits 2*MSL then -> CLOSED.
+                                     `);
+                                    console.log("Server CLOSED, Client TIME_WAIT");
+                                    checkEnableCloseListener();
+                                     setTimeout(() => {
+                                         if (clientSocketState === 'TIME_WAIT') {
+                                             clientSocketState = 'CLOSED';
+                                             updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
+                                             setExplanation(`
+                                                <strong>Client TIME_WAIT Expires</strong><br>
+                                                Client socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
+                                             `);
+                                             console.log("Client CLOSED");
+                                             checkEnableCloseListener();
+                                         }
+                                     }, 2000);
+                                }
+                            }, 700);
+                        }
+                    }, 700);
+                }
+
+                btnCloseServer.disabled = true;
+                step = 4;
+                console.log("Step 5b: Server Initiated or Responded to Close");
+            });
+
+            btnCloseListen.addEventListener('click', () => {
+                if (listenerClosed || serverListenSocketState !== 'LISTEN') return;
+                listenerClosed = true;
+                serverListenSocketState = 'CLOSED';
+                updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'close(listen_fd)');
+                setExplanation(`
+                    <strong>Server: close(listen_fd)</strong><br>
+                    1. Server application calls <code>close()</code> on the original <strong>listening</strong> socket's file descriptor.<br>
+                    2. The kernel marks the listening socket as closed.<br>
+                    3. No new incoming SYN packets will be accepted for this port; the SYN and Accept queues associated with this listener are effectively dismantled.<br>
+                    4. Any established connections (handled by separate fds) are unaffected by closing the listener fd, but no *new* connections can be made.<br>
+                    5. The listening socket transitions back to <strong>CLOSED</strong>. All server resources are now released (assuming connection sockets are also closed). Click Reset to start over.
+                `);
+                btnCloseListen.disabled = true;
+                step = 5;
+                console.log("Step 6: Server Closed Listening Socket");
+            });
+
+
+             function handleSimultaneousCloseReceive(receiver, packetType) {
+                 console.log(`Simultaneous close: ${receiver} received ${packetType}`);
+                  checkEnableCloseListener();
+             }
+
+             // Initial setup on load
+             resetVisualization();
         });
-
-        // Use window.onload for final setup after all resources are loaded
-        window.onload = resetVisualization;
-
 
     </script>
 </body>
