@@ -449,6 +449,12 @@
 
             // Create a synth, play sound, and dispose immediately after release
             try {
+                 // Check if audio context is actually running now before creating synth
+                 if (Tone.context.state !== 'running') {
+                     console.warn("Audio context not running, cannot play sound.");
+                     return;
+                 }
+
                 const tempSynth = new Tone.Synth({
                      oscillator: { type: 'sine' },
                      envelope: { attack: 0.005, decay: 0.1, sustain: 0.01, release: 0.1 },
@@ -638,11 +644,24 @@
         }
 
 
-        function checkEnableCloseListener() {
-             if ((clientSocketState === 'CLOSED' || clientSocketState === 'TIME_WAIT') &&
-                 (serverConnSocketState === 'CLOSED' || serverConnSocketState === 'TIME_WAIT') &&
-                  serverListenSocketState === 'LISTEN') {
-                 btnCloseListen.disabled = false;
+        /**
+         * Checks if the connection is fully closed and enables appropriate next actions.
+         * Now enables BOTH connect (for new connection) and close listener.
+         */
+        function checkEnablePostConnectionActions() {
+             const clientFinal = (clientSocketState === 'CLOSED' || clientSocketState === 'TIME_WAIT');
+             const serverConnFinal = (serverConnSocketState === 'CLOSED' || serverConnSocketState === 'TIME_WAIT');
+
+             if (clientFinal && serverConnFinal && serverListenSocketState === 'LISTEN') {
+                 btnConnect.disabled = false; // Allow new connection
+                 btnCloseListen.disabled = false; // Allow closing listener
+                 setExplanation(`
+                    Connection closed. The server is still listening.<br>
+                    You can now either:<br>
+                    - Click <strong>'2. Client: connect()'</strong> to simulate a new client connection.<br>
+                    - Click <strong>'6. Server: close(listen_fd)'</strong> to shut down the server listener.
+                 `);
+                 console.log("Post-connection actions enabled: Connect and Close Listener");
              }
         }
 
@@ -737,7 +756,30 @@
             });
 
             btnConnect.addEventListener('click', () => {
-                if (step !== 1) return;
+                // Allow connect if server is listening (step 1) OR if connection closed but server still listening (step > 4)
+                if (step !== 1 && !(step >= 4 && serverListenSocketState === 'LISTEN')) return;
+
+                // Reset client state for new connection attempt
+                clientSocketState = 'CLOSED';
+                updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
+                clientClosing = false; // Reset closing flag if reconnecting
+
+                // Reset server connection state if reconnecting after close
+                if (step >= 4) {
+                    serverConnSocketState = 'CLOSED';
+                    updateSocketUI(serverConnSocket, serverConnState, serverConnSyscall, serverConnSocketState);
+                    serverConnSocket.classList.add('hidden');
+                    serverClosing = false;
+                    connectionEstablished = false;
+                    // Ensure other buttons are disabled again until accept
+                    btnSendClient.disabled = true;
+                    btnSendServer.disabled = true;
+                    btnCloseClient.disabled = true;
+                    btnCloseServer.disabled = true;
+                    btnCloseListen.disabled = true; // Disable listener close while attempting new connection
+                }
+
+
                 clientSocketState = 'SYN_SENT';
                 updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState, 'socket(), connect()');
                 animatePacket('SYN', 'client-to-server');
@@ -797,8 +839,8 @@
                     }
                 }, 700); // Server receives SYN
 
-                btnConnect.disabled = true;
-                step = 2;
+                btnConnect.disabled = true; // Disable connect again after starting
+                step = 2; // Reset step to indicate handshake in progress
                 console.log("Step 2: Connect Initiated (SYN sent)");
             });
 
@@ -917,7 +959,7 @@
                                         Server app should call <code>close()</code> on connection fd.
                                     `);
                                     console.log("Client in FIN_WAIT_2, Server in CLOSE_WAIT");
-                                    checkEnableCloseListener();
+                                    checkEnablePostConnectionActions(); // Check if next actions can be enabled
                                 }
                             }, 700);
                         } else if (serverClosing) {
@@ -956,7 +998,7 @@
                                         Server waits 2*MSL then -> CLOSED.
                                      `);
                                      console.log("Client CLOSED, Server TIME_WAIT");
-                                     checkEnableCloseListener();
+                                     checkEnablePostConnectionActions(); // Check if next actions can be enabled
                                      setTimeout(() => {
                                          if (serverConnSocketState === 'TIME_WAIT') {
                                              serverConnSocketState = 'CLOSED';
@@ -964,10 +1006,10 @@
                                              serverConnSocket.classList.add('hidden');
                                              setExplanation(`
                                                 <strong>Server TIME_WAIT Expires</strong><br>
-                                                Server socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
+                                                Server socket -> <strong>CLOSED</strong>. Connection finished. <br> You can now connect a new client or close the listener.
                                              `);
                                              console.log("Server CLOSED");
-                                             checkEnableCloseListener();
+                                             checkEnablePostConnectionActions(); // Check again now server is fully closed
                                          }
                                      }, 2000);
                                  }
@@ -977,7 +1019,7 @@
                 }
 
                 btnCloseClient.disabled = true;
-                step = 4;
+                step = 4; // Enter closing phase
                 console.log("Step 5a: Client Initiated or Responded to Close");
             });
 
@@ -1018,7 +1060,7 @@
                                         Client app should call <code>close()</code>.
                                      `);
                                      console.log("Server in FIN_WAIT_2, Client in CLOSE_WAIT");
-                                     checkEnableCloseListener();
+                                     checkEnablePostConnectionActions(); // Check if next actions can be enabled
                                  }
                              }, 700);
                          } else if (clientClosing) {
@@ -1059,17 +1101,17 @@
                                         Client waits 2*MSL then -> CLOSED.
                                      `);
                                     console.log("Server CLOSED, Client TIME_WAIT");
-                                    checkEnableCloseListener();
+                                    checkEnablePostConnectionActions(); // Check if next actions can be enabled
                                      setTimeout(() => {
                                          if (clientSocketState === 'TIME_WAIT') {
                                              clientSocketState = 'CLOSED';
                                              updateSocketUI(clientSocket, clientState, clientSyscall, clientSocketState);
                                              setExplanation(`
                                                 <strong>Client TIME_WAIT Expires</strong><br>
-                                                Client socket -> <strong>CLOSED</strong>. Connection finished. You can now close the listening socket.
+                                                Client socket -> <strong>CLOSED</strong>. Connection finished. <br> You can now connect a new client or close the listener.
                                              `);
                                              console.log("Client CLOSED");
-                                             checkEnableCloseListener();
+                                             checkEnablePostConnectionActions(); // Check again now client is fully closed
                                          }
                                      }, 2000);
                                 }
@@ -1079,12 +1121,18 @@
                 }
 
                 btnCloseServer.disabled = true;
-                step = 4;
+                step = 4; // Enter closing phase
                 console.log("Step 5b: Server Initiated or Responded to Close");
             });
 
             btnCloseListen.addEventListener('click', () => {
-                if (listenerClosed || serverListenSocketState !== 'LISTEN') return;
+                // Allow closing listener only if connection is fully closed OR if server is just listening initially
+                const clientFinal = (clientSocketState === 'CLOSED' || clientSocketState === 'TIME_WAIT');
+                const serverConnFinal = (serverConnSocketState === 'CLOSED' || serverConnSocketState === 'TIME_WAIT');
+                const canClose = (clientFinal && serverConnFinal) || step < 2; // Allow closing if connection done or before connection starts
+
+                if (listenerClosed || serverListenSocketState !== 'LISTEN' || !canClose) return;
+
                 listenerClosed = true;
                 serverListenSocketState = 'CLOSED';
                 updateSocketUI(serverListenSocket, serverListenState, serverListenSyscall, serverListenSocketState, 'close(listen_fd)');
@@ -1097,14 +1145,15 @@
                     5. The listening socket transitions back to <strong>CLOSED</strong>. All server resources are now released (assuming connection sockets are also closed). Click Reset to start over.
                 `);
                 btnCloseListen.disabled = true;
-                step = 5;
+                btnConnect.disabled = true; // Disable connect if listener is closed
+                step = 5; // Final step
                 console.log("Step 6: Server Closed Listening Socket");
             });
 
 
              function handleSimultaneousCloseReceive(receiver, packetType) {
                  console.log(`Simultaneous close: ${receiver} received ${packetType}`);
-                  checkEnableCloseListener();
+                  checkEnablePostConnectionActions(); // Check if next actions can be enabled
              }
 
              // Initial setup on load
