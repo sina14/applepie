@@ -2,7 +2,8 @@ FROM ubuntu:latest
 
 RUN apt-get -y update && apt-get -y install nginx
 
-COPY content/*.html /var/www/html/*.html
+COPY content/index.html /var/www/html/index.html
+COPY content/lynis_report.html /var/www/html/lynis_report.html
 
 EXPOSE 80
 
