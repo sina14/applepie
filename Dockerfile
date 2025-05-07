@@ -2,7 +2,7 @@ FROM ubuntu:latest
 
 RUN apt-get -y update && apt-get -y install nginx
 
-COPY content/index.html /var/www/html/index.html
+COPY content/*.html /var/www/html/*.html
 
 EXPOSE 80
 
